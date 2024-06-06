@@ -82,6 +82,15 @@ export default [{
       {key: 'build', label: '执行构建'},
       {key: 'del', label: '删除版本'},
     ]
+  }, {
+    key: 'docker_images',
+    label: '镜像仓库',
+    perms: [
+      {key: 'view', label: '查看构建'},
+      {key: 'add', label: '新建版本'},
+      {key: 'build', label: '执行构建'},
+      {key: 'del', label: '删除版本'},
+    ]
   },{
     key: 'request',
     label: '发布申请',

@@ -162,6 +162,7 @@ export default observer(function () {
                 <Select.Option value="branch">Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
                 <Select.Option value="repository">构建仓库</Select.Option>
+                <Select.Option value="docker_images">镜像仓库</Select.Option>
               </Select>
               <Select
                 showSearch

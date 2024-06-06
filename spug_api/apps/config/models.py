@@ -9,6 +9,7 @@ from apps.account.models import User
 class Environment(models.Model, ModelMixin):
     name = models.CharField(max_length=50)
     key = models.CharField(max_length=50)
+    type = models.CharField(max_length=10)
     desc = models.CharField(max_length=255, null=True)
     sort_id = models.IntegerField(default=0, db_index=True)
     created_at = models.CharField(max_length=20, default=human_datetime)

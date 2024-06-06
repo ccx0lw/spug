@@ -25,6 +25,7 @@ class EnvironmentView(View):
             Argument('id', type=int, required=False),
             Argument('name', help='请输入环境名称'),
             Argument('key', help='请输入唯一标识符'),
+            Argument('type', help='请选择环境类型'),
             Argument('desc', required=False)
         ).parse(request.body)
         if error is None:

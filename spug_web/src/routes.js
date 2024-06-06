@@ -25,6 +25,7 @@ import ExecTemplate from './pages/exec/template';
 import ExecTransfer from './pages/exec/transfer';
 import DeployApp from './pages/deploy/app';
 import DeployRepository from './pages/deploy/repository';
+import DeployDockerImages from './pages/deploy/docker.images';
 import DeployRequest from './pages/deploy/request';
 import ScheduleIndex from './pages/schedule';
 import ConfigEnvironment from './pages/config/environment';
@@ -60,9 +61,10 @@ export default [
     ]
   },
   {
-    icon: <FlagOutlined/>, title: '应用发布', auth: 'deploy.app.view|deploy.repository.view|deploy.request.view', child: [
+    icon: <FlagOutlined/>, title: '应用发布', auth: 'deploy.app.view|deploy.repository.view|deploy.request.view|deploy.docker_images.view', child: [
       {title: '发布配置', auth: 'deploy.app.view', path: '/deploy/app', component: DeployApp},
       {title: '构建仓库', auth: 'deploy.repository.view', path: '/deploy/repository', component: DeployRepository},
+      {title: '镜像仓库', auth: 'deploy.docker_images.view', path: '/deploy/docker_images', component: DeployDockerImages},
       {title: '发布申请', auth: 'deploy.request.view', path: '/deploy/request', component: DeployRequest},
     ]
   },

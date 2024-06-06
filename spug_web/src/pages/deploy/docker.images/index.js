@@ -1,6 +1,6 @@
 /**
- * Copyright (c) OpenSpug Organization. https://github.com/openspug/spug
- * Copyright (c) <spug.dev@gmail.com>
+ * Copyright: (c) ccx0lw. https://github.com/ccx0lw/spug
+ * Copyright: (c) <fcjava@163.com>
  * Released under the AGPL-3.0 License.
  */
 import React, { useEffect } from 'react';
@@ -22,7 +22,7 @@ export default observer(function () {
     if (!appStore.records.length) appStore.fetchRecords()
   }, [])
   return (
-    <AuthDiv auth="deploy.repository.view">
+    <AuthDiv auth="deploy.docker_images.view">
       <Breadcrumb>
         <Breadcrumb.Item>首页</Breadcrumb.Item>
         <Breadcrumb.Item>应用发布</Breadcrumb.Item>

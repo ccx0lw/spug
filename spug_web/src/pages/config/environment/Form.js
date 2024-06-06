@@ -5,9 +5,10 @@
  */
 import React, { useState } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Form, Input, message } from 'antd';
+import { Modal, Form, Input, message, Select } from 'antd';
 import http from 'libs/http';
 import store from './store';
+const { Option } = Select;
 
 export default observer(function () {
   const [form] = Form.useForm();
@@ -44,6 +45,20 @@ export default observer(function () {
           tooltip="环境的唯一标识符，会在配置中心API中使用，具体请参考官方文档。"
           extra="可以由字母、数字和下划线组成。">
           <Input placeholder="请输入唯一标识符，例如：dev"/>
+        </Form.Item>
+        <Form.Item
+          required
+          name="type"
+          label="环境类型"
+          tooltip="前端/后台发布/镜像编译/其它"
+          extra="可以由字母、数字和下划线组成。"
+          >
+          <Select>
+            <Option value="front">前端发布</Option>
+            <Option value="backend">后台发布</Option>
+            <Option value="images">镜像编译</Option>
+            <Option value="other">其它</Option>
+          </Select>
         </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input.TextArea placeholder="请输入备注信息"/>
