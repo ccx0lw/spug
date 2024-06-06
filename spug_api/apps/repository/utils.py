@@ -44,7 +44,7 @@ def dispatch(rep: Repository, helper=None):
         )
         # append configs
         configs = compose_configs(rep.app, rep.env_id)
-        configs_env = {f'_SPUG_{k.upper()}': v for k, v in configs.items()}
+        configs_env = {f'{k.upper()}': v for k, v in configs.items()}
         env.update(configs_env)
 
         _build(rep, helper, env)

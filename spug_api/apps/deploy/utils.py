@@ -51,7 +51,7 @@ def dispatch(req, fail_mode=False):
         )
         # append configs
         configs = compose_configs(req.deploy.app, req.deploy.env_id)
-        configs_env = {f'_SPUG_{k.upper()}': v for k, v in configs.items()}
+        configs_env = {f'{k.upper()}': v for k, v in configs.items()}
         env.update(configs_env)
 
         if req.deploy.extend == '1':

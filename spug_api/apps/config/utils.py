@@ -6,7 +6,7 @@ from apps.app.models import App
 import json
 
 
-def compose_configs(app, env_id, no_prefix=False):
+def compose_configs(app, env_id, no_prefix=True):
     configs = dict()
     # app own configs
     for item in Config.objects.filter(type='app', o_id=app.id, env_id=env_id).only('key', 'value'):

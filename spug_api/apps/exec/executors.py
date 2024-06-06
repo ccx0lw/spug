@@ -32,7 +32,7 @@ class Job:
             SPUG_INTERPRETER=interpreter
         )
         if isinstance(params, dict):
-            self.env.update({f'_SPUG_{k}': str(v) for k, v in params.items()})
+            self.env.update({f'{k}': str(v) for k, v in params.items()})
 
     def _send(self, message):
         self.rds.publish(self.token, json.dumps(message))
