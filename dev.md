@@ -51,3 +51,19 @@ npm start
 http://localhost:3000
 用户名：admin  
 密码：spug.dev
+
+
+
+### 其它
+
+```shell
+
+# 安装v18
+nvm install v18
+
+# 设置环境变量，
+export NODE_OPTIONS=--openssl-legacy-provider
+
+# 设置node版本到v18
+nvm use v18
+```
