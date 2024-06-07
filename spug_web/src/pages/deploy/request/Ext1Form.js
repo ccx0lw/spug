@@ -42,12 +42,6 @@ export default observer(function () {
   const [versions, setVersions] = useState({});
   const [env, setEnv] = useState({});
   useEffect(() => {
-    // 增加异步逻辑，以修复页面在初次载入时主机列表弹框看不到主机信息的问题
-    // setLoading(true)
-    // hostStore.initial().then(() => {
-    //   // 异步执行完后，去除 loading 状态
-    //   setLoading(false)
-    // })
     const {app_host_ids, host_ids} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
     fetchVersions()
@@ -65,7 +59,7 @@ export default observer(function () {
 
     Promise.all([p1, p2, p3, hostStore.initial()])
       .then(([res1, res2, res3]) => {
-        if (!versions.branches) _initial(res1, res2)
+        if (!versions.branches) _initial(res1, res2, res3)
         setVersions(res1)
         setEnv(res3)
         var tmp = res2
@@ -121,7 +115,7 @@ export default observer(function () {
     }
   }
 
-  function _initial(versions, repositories) {
+  function _initial(versions, repositories, env) {
     if (env.prod) {
       return _setDefault('tags', null, null, null)
     }
@@ -171,6 +165,14 @@ export default observer(function () {
         <Form.Item required name="name" label="申请标题">
           <Input placeholder="请输入申请标题"/>
         </Form.Item>
+        {
+          env.type == 2 ? (
+            <Form.Item name="image_version" label="镜像版本">
+          <Input placeholder="请输入备注信息"/>
+        </Form.Item>
+          ) : ('')
+        }
+        
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
             根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"
@@ -260,6 +262,7 @@ export default observer(function () {
           {host_ids.length > 3 ? (<span> ... 还有{host_ids.length-3}台</span>) : (<span></span>)}
           {/* <Button disabled={true} type="link" style={{padding: 0}} onClick={() => setVisible(true)}>选择主机</Button> */}
         </Form.Item>
+        
         <Form.Item name="desc" label="备注信息">
           <Input placeholder="请输入备注信息"/>
         </Form.Item>

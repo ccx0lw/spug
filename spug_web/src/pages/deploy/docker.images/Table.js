@@ -70,6 +70,7 @@ function ComTable() {
       loading={store.isFetching}
       dataSource={store.dataSource}
       onReload={store.fetchRecords}
+      /*
       actions={[
         <AuthButton
           auth="deploy.docker_images.add"
@@ -77,6 +78,7 @@ function ComTable() {
           icon={<PlusOutlined/>}
           onClick={store.showForm}>新建</AuthButton>
       ]}
+      */
       expandable={{expandedRowRender, expandRowByClick: true}}
       pagination={{
         showSizeChanger: true,

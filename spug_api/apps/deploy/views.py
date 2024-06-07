@@ -242,9 +242,9 @@ def post_request_ext1(request):
         if (deploy.env.prod and form.extra[0] != 'tag'):
             if (form.extra[0] == 'repository'):
                 if (form.extra[1] != 'tag'):
-                    return json_response(error='生产环境只能选择tag代码'+json.dumps(form.extra))
+                    return json_response(error='生产环境只能选择tag代码')
             else:
-                return json_response(error='生产环境只能选择tag代码'+json.dumps(form.extra))
+                return json_response(error='生产环境只能选择tag代码')
 
         form.extra = json.dumps(form.extra)
         form.status = '0' if deploy.is_audit else '1'
