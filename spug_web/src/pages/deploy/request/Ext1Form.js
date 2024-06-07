@@ -40,13 +40,14 @@ export default observer(function () {
   const [extra1, setExtra1] = useState();
   const [extra2, setExtra2] = useState();
   const [versions, setVersions] = useState({});
+  const [env, setEnv] = useState({});
   useEffect(() => {
     // 增加异步逻辑，以修复页面在初次载入时主机列表弹框看不到主机信息的问题
-    setLoading(true)
-    hostStore.initial().then(() => {
-      // 异步执行完后，去除 loading 状态
-      setLoading(false)
-    })
+    // setLoading(true)
+    // hostStore.initial().then(() => {
+    //   // 异步执行完后，去除 loading 状态
+    //   setLoading(false)
+    // })
     const {app_host_ids, host_ids} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
     fetchVersions()
@@ -58,11 +59,20 @@ export default observer(function () {
     const deploy_id = store.record.deploy_id
     const p1 = http.get(`/api/app/deploy/${deploy_id}/versions/`, {timeout: 300000})
     const p2 = http.get('/api/repository/', {params: {deploy_id}})
-    Promise.all([p1, p2])
-      .then(([res1, res2]) => {
+
+    // 获取deploy的环境信息，用于判断是否是生产环境，是否是镜像编译、后台发布
+    const p3 = http.get(`/api/app/deploy/${deploy_id}/environment/`, {timeout: 300000})
+
+    Promise.all([p1, p2, p3, hostStore.initial()])
+      .then(([res1, res2, res3]) => {
         if (!versions.branches) _initial(res1, res2)
         setVersions(res1)
-        setRepositories(res2)
+        setEnv(res3)
+        var tmp = res2
+        if (res3?.prod) {
+          tmp = res2.filter(item => item?.extra?.length > 0 && item?.extra[0] == 'tag')
+        }
+        setRepositories(tmp)
       })
       .finally(() => setFetching(false))
   }
@@ -112,6 +122,10 @@ export default observer(function () {
   }
 
   function _initial(versions, repositories) {
+    if (env.prod) {
+      return _setDefault('tags', null, null, null)
+    }
+
     const {branches, tags} = versions;
     if (branches && tags) {
       for (let item of store.records) {
@@ -158,17 +172,16 @@ export default observer(function () {
           <Input placeholder="请输入申请标题"/>
         </Form.Item>
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
-            根据网络情况，首次刷新可能会很慢，请耐心等待。 {JSON.stringify(store.record)}
+            根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"
                href="https://spug.cc/docs/use-problem#clone">clone 失败？</a>
           </span>}>
           <Form.Item style={{display: 'inline-block', marginBottom: 0, width: '450px'}}>
             <Input.Group compact>
               <Select value={git_type} onChange={switchType} style={{width: 100}}>
-                <Select.Option value="branch">Branch</Select.Option>
+                <Select.Option value="branch" disabled={env.prod}>Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
                 <Select.Option value="repository">构建仓库</Select.Option>
-                <Select.Option value="docker_images">镜像仓库</Select.Option>
               </Select>
               <Select
                 showSearch

@@ -238,6 +238,14 @@ def post_request_ext1(request):
         else:
             return json_response(error='参数错误')
 
+        # 获取环境，对应的环境是否是生产环境。 是则form.extra[0]只能是tag
+        if (deploy.env.prod and form.extra[0] != 'tag'):
+            if (form.extra[0] == 'repository'):
+                if (form.extra[1] != 'tag'):
+                    return json_response(error='生产环境只能选择tag代码'+json.dumps(form.extra))
+            else:
+                return json_response(error='生产环境只能选择tag代码'+json.dumps(form.extra))
+
         form.extra = json.dumps(form.extra)
         form.status = '0' if deploy.is_audit else '1'
         form.host_ids = json.dumps(sorted(form.host_ids))

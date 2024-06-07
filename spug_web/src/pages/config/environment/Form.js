@@ -45,8 +45,8 @@ export default observer(function () {
           <Select>
             <Option value={0}>其它</Option>
             <Option value={1}>前端发布</Option>
-            <Option value={2}>后台发布</Option>
-            <Option value={3}>镜像编译</Option>
+            <Option value={2}>后台发布(K8S/Docker)</Option>
+            <Option value={3}>镜像编译(Docker镜像)</Option>
           </Select>
         </Form.Item>
         <Form.Item required name="name" label="环境名称">

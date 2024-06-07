@@ -84,7 +84,7 @@ export default [{
     ]
   }, {
     key: 'docker_images',
-    label: '镜像仓库',
+    label: '容器镜像',
     perms: [
       {key: 'view', label: '查看构建'},
       {key: 'add', label: '新建版本'},

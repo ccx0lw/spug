@@ -195,7 +195,18 @@ class DeployView(View):
                 item.delete()
             deploy.delete()
         return json_response(error=error)
-
+    
+@auth('deploy.app.view|deploy.request.view')
+def get_environment_info(request, deploy_id):
+    deploy = Deploy.objects.get(pk=deploy_id)
+    env = deploy.env
+    env_info = {
+        'id': env.id,
+        'name': env.name,
+        'type': env.type,
+        'prod': env.prod
+    }
+    return json_response(env_info)
 
 @auth('deploy.app.config|deploy.repository.add|deploy.request.add|deploy.request.edit')
 def get_versions(request, d_id):
