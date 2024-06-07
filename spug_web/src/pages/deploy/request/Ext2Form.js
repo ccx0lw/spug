@@ -6,12 +6,13 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { UploadOutlined } from '@ant-design/icons';
-import { Modal, Form, Input, Upload, DatePicker, message, Button } from 'antd';
+import { Modal, Form, Input, Upload, DatePicker, message, Button, Tag } from 'antd';
 import HostSelector from './HostSelector';
 import { http, clsNames, X_TOKEN } from 'libs';
 import styles from './index.module.less';
 import store from './store';
 import lds from 'lodash';
+import hostStore from 'pages/host/store';
 
 export default observer(function () {
   const [form] = Form.useForm();
@@ -23,6 +24,12 @@ export default observer(function () {
   const [plan, setPlan] = useState(store.record.plan);
 
   useEffect(() => {
+    // 增加异步逻辑，以修复页面在初次载入时主机列表弹框看不到主机信息的问题
+    setLoading(true)
+    hostStore.initial().then(() => {
+      // 异步执行完后，去除 loading 状态
+      setLoading(false)
+    })
     const {app_host_ids, host_ids, extra} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
     if (store.record.extra) setFileList([{...extra, uid: '0'}])
@@ -98,10 +105,18 @@ export default observer(function () {
           </Form.Item>
         )}
         <Form.Item required label="目标主机" tooltip="可以通过创建多个发布申请单，选择主机分批发布。">
-          {host_ids.length > 0 && (
+          {/*{host_ids.length > 0 && (
             <span style={{marginRight: 16}}>已选择 {host_ids.length} 台（可选{app_host_ids.length}）</span>
-          )}
-          <Button type="link" style={{padding: 0}} onClick={() => setVisible(true)}>选择主机</Button>
+          )}*/}
+          <span>
+          {host_ids.slice(0, Math.min(3, host_ids.length)).map((id) => (
+            <Tag color="#2db7f5" key={id} style={{ marginRight: 8 }}>
+              {lds.get(hostStore.idMap, `${id}.name`)}[{lds.get(hostStore.idMap, `${id}.hostname`)}]
+            </Tag>
+          ))}
+          </span>
+          {host_ids.length > 3 ? (<span> ... 还有{host_ids.length-3}台</span>) : (<span></span>)}
+          {/* <Button disabled={true} type="link" style={{padding: 0}} onClick={() => setVisible(true)}>选择主机</Button> */}
         </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input placeholder="请输入备注信息"/>

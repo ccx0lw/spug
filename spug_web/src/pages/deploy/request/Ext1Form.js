@@ -5,13 +5,14 @@
  */
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Form, Input, Select, DatePicker, Button, message } from 'antd';
+import { Modal, Form, Input, Select, DatePicker, Button, message, Tag } from 'antd';
 import { LoadingOutlined, SyncOutlined } from '@ant-design/icons';
 import HostSelector from './HostSelector';
 import { http, history, includes } from 'libs';
 import store from './store';
 import lds from 'lodash';
-import moment from 'moment';
+import moment, { max } from 'moment';
+import hostStore from 'pages/host/store';
 
 function NoVersions() {
   return (
@@ -39,8 +40,13 @@ export default observer(function () {
   const [extra1, setExtra1] = useState();
   const [extra2, setExtra2] = useState();
   const [versions, setVersions] = useState({});
-
   useEffect(() => {
+    // 增加异步逻辑，以修复页面在初次载入时主机列表弹框看不到主机信息的问题
+    setLoading(true)
+    hostStore.initial().then(() => {
+      // 异步执行完后，去除 loading 状态
+      setLoading(false)
+    })
     const {app_host_ids, host_ids} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
     fetchVersions()
@@ -152,7 +158,7 @@ export default observer(function () {
           <Input placeholder="请输入申请标题"/>
         </Form.Item>
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
-            根据网络情况，首次刷新可能会很慢，请耐心等待。
+            根据网络情况，首次刷新可能会很慢，请耐心等待。 {JSON.stringify(store.record)}
             <a target="_blank" rel="noopener noreferrer"
                href="https://spug.cc/docs/use-problem#clone">clone 失败？</a>
           </span>}>
@@ -228,10 +234,18 @@ export default observer(function () {
           </Form.Item>
         )}
         <Form.Item required label="目标主机" tooltip="可以通过创建多个发布申请单，选择主机分批发布。">
-          {host_ids.length > 0 && (
+          {/*{host_ids.length > 0 && (
             <span style={{marginRight: 16}}>已选择 {host_ids.length} 台（可选{app_host_ids.length}）</span>
-          )}
-          <Button type="link" style={{padding: 0}} onClick={() => setVisible(true)}>选择主机</Button>
+          )}*/}
+          <span>
+          {host_ids.slice(0, Math.min(3, host_ids.length)).map((id) => (
+            <Tag color="#2db7f5" key={id} style={{ marginRight: 8 }}>
+              {lds.get(hostStore.idMap, `${id}.name`)}[{lds.get(hostStore.idMap, `${id}.hostname`)}]
+            </Tag>
+          ))}
+          </span>
+          {host_ids.length > 3 ? (<span> ... 还有{host_ids.length-3}台</span>) : (<span></span>)}
+          {/* <Button disabled={true} type="link" style={{padding: 0}} onClick={() => setVisible(true)}>选择主机</Button> */}
         </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input placeholder="请输入备注信息"/>

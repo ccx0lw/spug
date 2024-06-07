@@ -20,6 +20,7 @@ export default observer(function () {
   useEffect(() => {
     store.fetchRecords();
     if (!appStore.records.length) appStore.fetchRecords()
+    if (!envStore.records.length) envStore.fetchRecords()
   }, [])
   return (
     <AuthDiv auth="deploy.repository.view">
@@ -27,7 +28,6 @@ export default observer(function () {
         <Breadcrumb.Item>首页</Breadcrumb.Item>
         <Breadcrumb.Item>应用发布</Breadcrumb.Item>
         <Breadcrumb.Item>构建仓库</Breadcrumb.Item>
-        <Breadcrumb.Item>镜像仓库</Breadcrumb.Item>
       </Breadcrumb>
       <SearchForm>
         <SearchForm.Item span={6} title="应用">

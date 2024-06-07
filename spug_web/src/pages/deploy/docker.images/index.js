@@ -20,13 +20,13 @@ export default observer(function () {
   useEffect(() => {
     store.fetchRecords();
     if (!appStore.records.length) appStore.fetchRecords()
+    if (!envStore.records.length) envStore.fetchRecords()
   }, [])
   return (
     <AuthDiv auth="deploy.docker_images.view">
       <Breadcrumb>
         <Breadcrumb.Item>首页</Breadcrumb.Item>
         <Breadcrumb.Item>应用发布</Breadcrumb.Item>
-        <Breadcrumb.Item>构建仓库</Breadcrumb.Item>
         <Breadcrumb.Item>镜像仓库</Breadcrumb.Item>
       </Breadcrumb>
       <SearchForm>
@@ -50,9 +50,11 @@ export default observer(function () {
             value={store.f_env_id}
             onChange={v => store.f_env_id = v}
             filterOption={(i, o) => includes(o.children, i)}
+            defaultValue={3}
+            disabled={true}
             placeholder="请选择">
             {envStore.records.map(item => (
-              <Select.Option key={item.id} value={item.id}>{item.name}</Select.Option>
+              <Select.Option key={item.id} value={item.type}>{item.name}</Select.Option>
             ))}
           </Select>
         </SearchForm.Item>
