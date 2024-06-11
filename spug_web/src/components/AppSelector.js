@@ -6,17 +6,19 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { observer } from 'mobx-react';
-import { Modal, Menu, Spin, Input } from 'antd';
+import { Modal, Menu, Spin, Input, Select } from 'antd';
 import { OrderedListOutlined, BuildOutlined, SearchOutlined } from '@ant-design/icons';
 import { includes, http } from 'libs';
 import styles from './index.module.less';
 import envStore from 'pages/config/environment/store';
+import tagStore from 'pages/config/tag/store';
 import lds from 'lodash';
 
 export default observer(function AppSelector(props) {
   const [fetching, setFetching] = useState(false);
   const [env_id, setEnvId] = useState();
   const [search, setSearch] = useState();
+  const [search_tag, setSearchTag] = useState();
   const [deploys, setDeploys] = useState([]);
 
   useEffect(() => {
@@ -29,6 +31,9 @@ export default observer(function AppSelector(props) {
     } else {
       _initEnv()
     }
+    if (tagStore.records.length === 0) {
+      tagStore.fetchRecords()
+    }
   }, [])
 
   function _initEnv() {
@@ -39,11 +44,15 @@ export default observer(function AppSelector(props) {
 
   let records = deploys.filter(x => x.env_id === Number(env_id));
   if (search) records = records.filter(x => includes(x['app_name'], search) || includes(x['app_key'], search));
+  if (search_tag) records = records.filter(x => x['app_rel_tags'].includes(search_tag));
   if (props.filter) records = records.filter(x => props.filter(x));
+
+  const tags = tagStore.records
+
   return (
     <Modal
       visible={props.visible}
-      width={800}
+      width={850}
       maskClosable={false}
       title="选择应用"
       bodyStyle={{padding: 0}}
@@ -65,6 +74,17 @@ export default observer(function AppSelector(props) {
           <Spin spinning={fetching}>
             <div className={styles.title}>
               <div className={styles.text}>{lds.get(envStore.idMap, `${env_id}.name`)}</div>
+              <Select 
+                allowClear
+                style={{width: 100}}
+                placeholder="请选择标签" 
+                onChange={e => setSearchTag(e)}>
+                { tags.map(item => (
+                  <Select.Option key={item.id} value={item.id}>
+                    <span>{item.name}</span>
+                  </Select.Option>
+                ))}
+              </Select>
               <Input
                 allowClear
                 style={{width: 200}}

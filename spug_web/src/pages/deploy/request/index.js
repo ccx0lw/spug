@@ -19,6 +19,7 @@ import Rollback from './Rollback';
 import { includes } from 'libs';
 import envStore from 'pages/config/environment/store';
 import appStore from 'pages/config/app/store';
+import tagStore from 'pages/config/tag/store';
 import store from './store';
 import moment from 'moment';
 import styles from './index.module.less';
@@ -28,6 +29,7 @@ function Index() {
     store.fetchRecords()
     if (envStore.records.length === 0) envStore.fetchRecords()
     if (appStore.records.length === 0) appStore.fetchRecords()
+    if (tagStore.records.length === 0) tagStore.fetchRecords()
     return () => store.leaveConsole()
   }, [])
 

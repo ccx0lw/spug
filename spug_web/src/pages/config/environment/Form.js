@@ -35,20 +35,6 @@ export default observer(function () {
       confirmLoading={loading}
       onOk={handleSubmit}>
       <Form form={form} initialValues={store.record} labelCol={{span: 6}} wrapperCol={{span: 14}}>
-        <Form.Item
-          required
-          name="type"
-          label="环境类型"
-          tooltip="前端/后台发布/镜像编译/其它"
-          extra="0:其它 1:前端发布 2:后台发布 3:镜像编译"
-          >
-          <Select>
-            <Option value={0}>其它</Option>
-            <Option value={1}>前端发布</Option>
-            <Option value={2}>后台发布(K8S/Docker)</Option>
-            <Option value={3}>镜像编译(Docker镜像)</Option>
-          </Select>
-        </Form.Item>
         <Form.Item required name="name" label="环境名称">
           <Input placeholder="请输入环境名称，例如：开发环境"/>
         </Form.Item>

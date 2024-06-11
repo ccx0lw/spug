@@ -15,6 +15,7 @@ class App(models.Model, ModelMixin):
     name = models.CharField(max_length=50)
     key = models.CharField(max_length=50, unique=True)
     desc = models.CharField(max_length=255, null=True)
+    rel_tags = models.TextField(null=True)
     rel_apps = models.TextField(null=True)
     rel_services = models.TextField(null=True)
     sort_id = models.IntegerField(default=0, db_index=True)
@@ -23,6 +24,7 @@ class App(models.Model, ModelMixin):
 
     def to_dict(self, *args, **kwargs):
         tmp = super().to_dict(*args, **kwargs)
+        tmp['rel_tags'] = json.loads(self.rel_tags) if self.rel_tags else []
         tmp['rel_apps'] = json.loads(self.rel_apps) if self.rel_apps else []
         tmp['rel_services'] = json.loads(self.rel_services) if self.rel_services else []
         return tmp
@@ -61,6 +63,10 @@ class Deploy(models.Model, ModelMixin):
         deploy = super().to_dict(*args, **kwargs)
         deploy['app_key'] = self.app_key if hasattr(self, 'app_key') else None
         deploy['app_name'] = self.app_name if hasattr(self, 'app_name') else None
+        deploy['app_rel_tags'] = json.loads(self.app_rel_tags) if self.app_rel_tags else []
+        deploy['env_name'] = self.env_name if hasattr(self, 'env_name') else None
+        deploy['env_prod'] = self.env_prod if hasattr(self, 'env_prod') else None
+
         deploy['host_ids'] = json.loads(self.host_ids)
         deploy['rst_notify'] = json.loads(self.rst_notify)
         deploy.update(self.extend_obj.to_dict())

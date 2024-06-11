@@ -35,6 +35,7 @@ class AppView(View):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
             Argument('name', help='请输入服务名称'),
+            Argument('rel_tags', type=list, required=False),
             Argument('key', help='请输入唯一标识符'),
             Argument('desc', required=False)
         ).parse(request.body)
@@ -52,6 +53,8 @@ class AppView(View):
                 App.objects.filter(pk=form.id).update(**form)
             else:
                 app = App.objects.create(created_by=request.user, **form)
+                if form.rel_tags is not None:
+                    app.rel_tags = json.dumps(form.rel_tags)
                 app.sort_id = app.id
                 app.save()
         return json_response(error=error)
@@ -60,6 +63,7 @@ class AppView(View):
     def patch(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='参数错误'),
+            Argument('rel_tags', type=list, required=False),
             Argument('rel_apps', type=list, required=False),
             Argument('rel_services', type=list, required=False),
             Argument('sort', filter=lambda x: x in ('up', 'down'), required=False)
@@ -68,6 +72,8 @@ class AppView(View):
             app = App.objects.filter(pk=form.id).first()
             if not app:
                 return json_response(error='未找到指定应用')
+            if form.rel_tags is not None:
+                app.rel_tags = json.dumps(form.rel_tags)
             if form.rel_apps is not None:
                 app.rel_apps = json.dumps(form.rel_apps)
             if form.rel_services is not None:
@@ -115,7 +121,7 @@ class DeployView(View):
             form.app_id__in = perms['apps']
             form.env_id__in = perms['envs']
         deploys = Deploy.objects.filter(**form) \
-            .annotate(app_name=F('app__name'), app_key=F('app__key')) \
+            .annotate(app_name=F('app__name'), app_key=F('app__key'), app_rel_tags=F('app__rel_tags'), env_name=F('env__name'), env_prod=F('env__prod')) \
             .order_by('-app__sort_id')
         return json_response(deploys)
 
@@ -197,16 +203,11 @@ class DeployView(View):
         return json_response(error=error)
     
 @auth('deploy.app.view|deploy.request.view')
-def get_environment_info(request, deploy_id):
-    deploy = Deploy.objects.get(pk=deploy_id)
-    env = deploy.env
-    env_info = {
-        'id': env.id,
-        'name': env.name,
-        'type': env.type,
-        'prod': env.prod
-    }
-    return json_response(env_info)
+def get_info(request, deploy_id):
+    deploys = Deploy.objects.filter(pk=deploy_id) \
+        .annotate(app_name=F('app__name'), app_key=F('app__key'), app_rel_tags=F('app__rel_tags'), env_name=F('env__name'), env_prod=F('env__prod')) \
+        .order_by('-app__sort_id').first()
+    return json_response(deploys)
 
 @auth('deploy.app.config|deploy.repository.add|deploy.request.add|deploy.request.edit')
 def get_versions(request, d_id):

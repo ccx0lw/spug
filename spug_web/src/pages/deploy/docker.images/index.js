@@ -50,8 +50,6 @@ export default observer(function () {
             value={store.f_env_id}
             onChange={v => store.f_env_id = v}
             filterOption={(i, o) => includes(o.children, i)}
-            defaultValue={3}
-            disabled={true}
             placeholder="请选择">
             {envStore.records.map(item => (
               <Select.Option key={item.id} value={item.type}>{item.name}</Select.Option>

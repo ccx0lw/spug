@@ -5,13 +5,15 @@
  */
 import React, { useState } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Form, Input, message } from 'antd';
+import { Modal, Form, Input, message, Select } from 'antd';
 import http from 'libs/http';
 import store from './store';
+import tagStore from 'pages/config/tag/store';
 
 export default observer(function () {
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false);
+  const tags = tagStore.records;
 
   function handleSubmit() {
     setLoading(true);
@@ -44,6 +46,19 @@ export default observer(function () {
           tooltip="应用的唯一标识符，会作为生成配置的前缀。"
           extra="可以由字母、数字和下划线组成。">
           <Input placeholder="请输入唯一标识符，例如：api_order"/>
+        </Form.Item>
+        <Form.Item
+          name="rel_tags"
+          label="标签"
+          tooltip="标签标识符，可以多个"
+          >
+          <Select mode="multiple" value={store.record.rel_tags} placeholder="请选择">
+              { tags.map(item => (
+                <Select.Option key={item.id} value={item.id}>
+                  <span>{item.name}</span>
+                </Select.Option>
+              ))}
+            </Select>
         </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input.TextArea placeholder="请输入备注信息"/>

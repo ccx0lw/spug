@@ -41,8 +41,12 @@ class Repository(models.Model, ModelMixin):
             tmp['app_name'] = self.app_name
         if hasattr(self, 'env_name'):
             tmp['env_name'] = self.env_name
+        if hasattr(self, 'env_prod'):
+            tmp['env_prod'] = self.env_prod
         if hasattr(self, 'created_by_user'):
             tmp['created_by_user'] = self.created_by_user
+        if hasattr(self, 'app_rel_tags'):
+            tmp['app_rel_tags'] = json.loads(self.app_rel_tags) if self.app_rel_tags else []
         return tmp
 
     def delete(self, using=None, keep_parents=False):

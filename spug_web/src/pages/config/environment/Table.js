@@ -5,7 +5,7 @@
  */
 import React, { useEffect } from 'react';
 import { observer } from 'mobx-react';
-import { Table, Modal, Divider, message } from 'antd';
+import { Table, Modal, Divider, message, Tag } from 'antd';
 import { PlusOutlined, UpSquareOutlined, DownSquareOutlined } from '@ant-design/icons';
 import { Action, TableCard, AuthButton } from 'components';
 import { http, hasPermission } from 'libs';
@@ -68,7 +68,12 @@ function ComTable() {
             style={{cursor: 'pointer', color: '#1890ff'}}/>
         </div>
       )}/>
-      <Table.Column title="环境名称" dataIndex="name"/>
+      <Table.Column title="环境名称" key="name" render={(info) => (
+        <div>
+          {info.prod?<Tag color="#f50">生产环境</Tag>:''}
+          <span>{info.name}</span>
+        </div>
+      )}/>
       <Table.Column title="标识符" dataIndex="key"/>
       <Table.Column ellipsis title="描述信息" dataIndex="desc"/>
       {hasPermission('config.env.edit|config.env.del') && (

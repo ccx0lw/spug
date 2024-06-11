@@ -32,6 +32,7 @@ import ConfigEnvironment from './pages/config/environment';
 import ConfigService from './pages/config/service';
 import ConfigApp from './pages/config/app';
 import ConfigSetting from './pages/config/setting';
+import ConfigTag from './pages/config/tag';
 import MonitorIndex from './pages/monitor';
 import AlarmIndex from './pages/alarm/alarm';
 import AlarmGroup from './pages/alarm/group';
@@ -80,6 +81,7 @@ export default [
       {title: '环境管理', auth: 'config.env.view', path: '/config/environment', component: ConfigEnvironment},
       {title: '服务配置', auth: 'config.src.view', path: '/config/service', component: ConfigService},
       {title: '应用配置', auth: 'config.app.view', path: '/config/app', component: ConfigApp},
+      {title: '标签配置', auth: 'config.tag.view', path: '/config/tag', component: ConfigTag},
       {path: '/config/setting/:type/:id', component: ConfigSetting},
     ]
   },

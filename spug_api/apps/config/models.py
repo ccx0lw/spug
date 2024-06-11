@@ -9,7 +9,6 @@ from apps.account.models import User
 class Environment(models.Model, ModelMixin):
     name = models.CharField(max_length=50)
     key = models.CharField(max_length=50)
-    type = models.IntegerField(default=0)
     prod = models.BooleanField(default=False)
     desc = models.CharField(max_length=255, null=True)
     sort_id = models.IntegerField(default=0, db_index=True)
@@ -86,3 +85,22 @@ class ConfigHistory(models.Model, ModelMixin):
     class Meta:
         db_table = 'config_histories'
         ordering = ('key',)
+
+class Tag(models.Model, ModelMixin):
+    name = models.CharField(max_length=50)
+    key = models.CharField(max_length=50, unique=True)
+    desc = models.CharField(max_length=255, null=True)
+    sort_id = models.IntegerField(default=0, db_index=True)
+    created_at = models.CharField(max_length=20, default=human_datetime)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT)
+
+    def to_dict(self, *args, **kwargs):
+        tmp = super().to_dict(*args, **kwargs)
+        return tmp
+
+    def __repr__(self):
+        return f'<App {self.name!r}>'
+
+    class Meta:
+        db_table = 'tags'
+        ordering = ('-sort_id',)

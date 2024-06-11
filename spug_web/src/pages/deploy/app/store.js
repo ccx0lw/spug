@@ -21,11 +21,13 @@ class Store {
   @observable ext2Visible = false;
   @observable autoVisible = false;
 
+  @observable f_tag;
   @observable f_name;
   @observable f_desc;
 
   @computed get dataSource() {
     let records = Object.values(toJS(this.records));
+    if (this.f_tag) records = records.filter(x => x.rel_tags.includes(this.f_tag));
     if (this.f_name) records = records.filter(x => x.name.toLowerCase().includes(this.f_name.toLowerCase()));
     if (this.f_desc) records = records.filter(x => x.desc && x.desc.toLowerCase().includes(this.f_desc.toLowerCase()));
     return records

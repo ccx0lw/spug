@@ -5,21 +5,19 @@
  */
 import React, { useState } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Form, Input, message, Select } from 'antd';
+import { Modal, Form, Input, message } from 'antd';
 import http from 'libs/http';
 import store from './store';
-import tagStore from 'pages/config/tag/store';
 
 export default observer(function () {
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const tags = tagStore.records;
+  const [loading, setLoading] = useState(false)
 
   function handleSubmit() {
     setLoading(true);
     const formData = form.getFieldsValue();
     formData['id'] = store.record.id;
-    http.post('/api/app/', formData)
+    http.post('/api/config/tag/', formData)
       .then(res => {
         message.success('操作成功');
         store.formVisible = false;
@@ -31,34 +29,21 @@ export default observer(function () {
     <Modal
       visible
       maskClosable={false}
-      title={store.record.id ? '编辑应用' : '新建应用'}
+      title={store.record.id ? '编辑标签' : '新建标签'}
       onCancel={() => store.formVisible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
       <Form form={form} initialValues={store.record} labelCol={{span: 6}} wrapperCol={{span: 14}}>
-        <Form.Item required name="name" label="应用名称">
-          <Input placeholder="请输入应用名称，例如：订单服务"/>
+        <Form.Item required name="name" label="标签名称">
+          <Input placeholder="请输入标签名称，例如：前端、后台"/>
         </Form.Item>
         <Form.Item
           required
           name="key"
           label="唯一标识符"
-          tooltip="给应用设置的唯一标识符，会用于配置中心的配置生成。"
+          tooltip="应用的唯一标识符，会作为生成配置的前缀。"
           extra="可以由字母、数字和下划线组成。">
-          <Input placeholder="请输入唯一标识符，例如：api_order"/>
-        </Form.Item>
-        <Form.Item
-          name="rel_tags"
-          label="标签"
-          tooltip="标签标识符，可以多个"
-          >
-          <Select mode="multiple" value={store.record.rel_tags} placeholder="请选择">
-            { tags.map(item => (
-              <Select.Option key={item.id} value={item.id}>
-                <span>{item.name}</span>
-              </Select.Option>
-            ))}
-          </Select>
+          <Input placeholder="请输入唯一标识符，例如：front"/>
         </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input.TextArea placeholder="请输入备注信息"/>

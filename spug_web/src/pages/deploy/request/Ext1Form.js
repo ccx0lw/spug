@@ -13,6 +13,7 @@ import store from './store';
 import lds from 'lodash';
 import moment, { max } from 'moment';
 import hostStore from 'pages/host/store';
+import tagStore from 'pages/config/tag/store';
 
 function NoVersions() {
   return (
@@ -41,11 +42,13 @@ export default observer(function () {
   const [extra2, setExtra2] = useState();
   const [versions, setVersions] = useState({});
   const [env, setEnv] = useState({});
+  const [appTags, setAppTags] = useState({})
   useEffect(() => {
     const {app_host_ids, host_ids} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
     fetchVersions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    setAppTags(tagStore.records)
   }, [])
 
   function fetchVersions() {
@@ -55,7 +58,7 @@ export default observer(function () {
     const p2 = http.get('/api/repository/', {params: {deploy_id}})
 
     // 获取deploy的环境信息，用于判断是否是生产环境，是否是镜像编译、后台发布
-    const p3 = http.get(`/api/app/deploy/${deploy_id}/environment/`, {timeout: 300000})
+    const p3 = http.get(`/api/app/deploy/${deploy_id}/info/`, {timeout: 300000})
 
     Promise.all([p1, p2, p3, hostStore.initial()])
       .then(([res1, res2, res3]) => {
@@ -63,7 +66,7 @@ export default observer(function () {
         setVersions(res1)
         setEnv(res3)
         var tmp = res2
-        if (res3?.prod) {
+        if (res3?.env_prod) {
           tmp = res2.filter(item => item?.extra?.length > 0 && item?.extra[0] == 'tag')
         }
         setRepositories(tmp)
@@ -116,7 +119,7 @@ export default observer(function () {
   }
 
   function _initial(versions, repositories, env) {
-    if (env.prod) {
+    if (env.env_prod) {
       return _setDefault('tags', null, null, null)
     }
 
@@ -157,7 +160,16 @@ export default observer(function () {
       visible
       width={800}
       maskClosable={false}
-      title={`${store.record.id ? '编辑' : '新建'}发布申请`}
+      title={
+        <div>
+          {store.record.id ? '编辑' : '新建'}<b>【{env.app_name}】</b>发布申请&ensp;
+          {env.env_prod ? <Tag color="#f50">生产环境</Tag> : ''}
+          {<Tag color="#2db7f5">{env.env_name}</Tag>}
+          {env.app_rel_tags?.length > 0 ? env.app_rel_tags.map(tid => (
+              <Tag>{appTags.find(item => item.id === tid).name}</Tag>
+            )) : ''}
+        </div>
+      }
       onCancel={() => store.ext1Visible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
@@ -165,14 +177,6 @@ export default observer(function () {
         <Form.Item required name="name" label="申请标题">
           <Input placeholder="请输入申请标题"/>
         </Form.Item>
-        {
-          env.type == 2 ? (
-            <Form.Item name="image_version" label="镜像版本">
-          <Input placeholder="请输入备注信息"/>
-        </Form.Item>
-          ) : ('')
-        }
-        
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
             根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"
@@ -181,7 +185,7 @@ export default observer(function () {
           <Form.Item style={{display: 'inline-block', marginBottom: 0, width: '450px'}}>
             <Input.Group compact>
               <Select value={git_type} onChange={switchType} style={{width: 100}}>
-                <Select.Option value="branch" disabled={env.prod}>Branch</Select.Option>
+                <Select.Option value="branch" disabled={env.env_prod}>Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
                 <Select.Option value="repository">构建仓库</Select.Option>
               </Select>

@@ -18,7 +18,7 @@ class Store {
 
   fetchRecords = () => {
     this.isFetching = true;
-    return http.get('/api/app/')
+    return http.get('/api/config/tag/')
       .then(res => this.records = res)
       .finally(() => this.isFetching = false)
   };
@@ -31,13 +31,7 @@ class Store {
   showRel = (info) => {
     this.relVisible = true;
     this.record = info;
-    this.confRel = {
-      app: info['rel_apps'],
-      service: info['rel_services']
-    }
   }
-
-  
 }
 
 export default new Store()

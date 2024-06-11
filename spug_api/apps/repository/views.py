@@ -21,7 +21,9 @@ class RepositoryView(View):
         deploy_id = request.GET.get('deploy_id')
         data = Repository.objects.filter(app_id__in=apps).annotate(
             app_name=F('app__name'),
+            app_rel_tags=F('app__rel_tags'),
             env_name=F('env__name'),
+            env_prod=F('env__prod'),
             created_by_user=F('created_by__nickname'))
         if deploy_id:
             data = data.filter(deploy_id=deploy_id, status='5')

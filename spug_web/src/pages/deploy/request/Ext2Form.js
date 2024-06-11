@@ -13,6 +13,7 @@ import styles from './index.module.less';
 import store from './store';
 import lds from 'lodash';
 import hostStore from 'pages/host/store';
+import tagStore from 'pages/config/tag/store';
 
 export default observer(function () {
   const [form] = Form.useForm();
@@ -22,18 +23,31 @@ export default observer(function () {
   const [fileList, setFileList] = useState([]);
   const [host_ids, setHostIds] = useState([]);
   const [plan, setPlan] = useState(store.record.plan);
+  const [env, setEnv] = useState({});
+  const [appTags, setAppTags] = useState({})
 
   useEffect(() => {
-    // 增加异步逻辑，以修复页面在初次载入时主机列表弹框看不到主机信息的问题
-    setLoading(true)
-    hostStore.initial().then(() => {
-      // 异步执行完后，去除 loading 状态
-      setLoading(false)
-    })
+    fetchData();
     const {app_host_ids, host_ids, extra} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
-    if (store.record.extra) setFileList([{...extra, uid: '0'}])
+    if (store.record.extra) {
+      setFileList([{...extra, uid: '0'}]);
+    }
+    setAppTags(tagStore.records);
   }, [])
+
+  function fetchData() {
+    setLoading(true)
+
+    // 获取deploy的环境信息，用于判断是否是生产环境，是否是镜像编译、后台发布
+    const p3 = http.get(`/api/app/deploy/${deploy_id}/info/`, {timeout: 300000})
+
+    Promise.all([p3, hostStore.initial()])
+      .then(([res3]) => {
+        setEnv(res3)
+      })
+      .finally(() => setLoading(false))
+  }
 
   function handleSubmit() {
     if (host_ids.length === 0) {
@@ -81,7 +95,16 @@ export default observer(function () {
       visible
       width={700}
       maskClosable={false}
-      title={`${store.record.id ? '编辑' : '新建'}发布申请`}
+      title={
+        <div>
+          {store.record.id ? '编辑' : '新建'}<b>【{env.app_name}】</b>发布申请&ensp;
+          {env.env_prod ? <Tag color="#f50">生产环境</Tag> : ''}
+          {<Tag color="#2db7f5">{env.env_name}</Tag>}
+          {env.app_rel_tags?.length > 0 ? env.app_rel_tags.map(tid => (
+              <Tag>{appTags.find(item => item.id === tid).name}</Tag>
+            )) : ''}
+        </div>
+      }
       onCancel={() => store.ext2Visible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
