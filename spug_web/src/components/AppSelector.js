@@ -34,6 +34,8 @@ export default observer(function AppSelector(props) {
     if (tagStore.records.length === 0) {
       tagStore.fetchRecords()
     }
+    return () => {
+    };
   }, [])
 
   function _initEnv() {
@@ -78,7 +80,7 @@ export default observer(function AppSelector(props) {
                 allowClear
                 style={{width: 100}}
                 placeholder="请选择标签" 
-                onChange={e => setSearchTag(e)}>
+                onChange={value => setSearchTag(value)}>
                 { tags.map(item => (
                   <Select.Option key={item.id} value={item.id}>
                     <span>{item.name}</span>

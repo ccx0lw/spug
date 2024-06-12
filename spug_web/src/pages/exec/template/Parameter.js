@@ -36,7 +36,7 @@ export default function Parameter(props) {
           <Input placeholder="请输入参数名称"/>
         </Form.Item>
         <Form.Item required name="variable" label="变量名"
-                   tooltip="在脚本使用的变量名称，固定前缀_SPUG_ + 输入的变量名，例如变量名name，则最终生成环境变量为 _SPUG_name">
+                   tooltip="在脚本使用的变量名称">
           <Input placeholder="请输入变量名"/>
         </Form.Item>
         <Form.Item required name="type" label="参数类型" tooltip="不同类型展示的形式不同。">

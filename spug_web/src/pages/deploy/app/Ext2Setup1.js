@@ -49,7 +49,17 @@ export default observer(function Ext2Setup1() {
     <Form labelCol={{span: 6}} wrapperCol={{span: 14}}>
       <Form.Item required label="发布环境" style={{marginBottom: 0}} tooltip="可以建立多个环境，实现同一应用在不同环境里配置不同的发布流程。">
         <Form.Item style={{display: 'inline-block', width: '80%'}}>
-          <Select disabled={store.isReadOnly} value={info.env_id} onChange={v => info.env_id = v} placeholder="请选择发布环境">
+          <Select disabled={store.isReadOnly} value={info.env_id} 
+          onChange={v => {
+              info.env_id = v;
+              // 查找并更新 env_name
+              const selectedEnv = envStore.records.find(item => item.id === v);
+              if (selectedEnv) {
+                info.env_name = selectedEnv.name;
+              }
+            }
+          } 
+          placeholder="请选择发布环境">
             {envStore.records.map(item => (
               <Select.Option disabled={envs.includes(item.id)} value={item.id} key={item.id}>{item.name}</Select.Option>
             ))}

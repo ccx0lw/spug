@@ -12,6 +12,7 @@ import { Action, AuthButton, TableCard } from 'components';
 import S from './index.module.less';
 import store from './store';
 import moment from 'moment';
+import tagStore from 'pages/config/tag/store';
 
 function DeployConfirm() {
   return (
@@ -62,6 +63,16 @@ function ComTable() {
           <div><BuildOutlined/> {info.version}</div>
         )
       }
+    }
+  }, {
+    title: '标签',
+    className: S.min120,
+    render: info => {
+      return (<div>
+              {info.app_rel_tags?.length > 0 ? info.app_rel_tags.map(tid => (
+                <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{tagStore.records.find(item => item.id === tid)?.name}</Tag>
+              )) : ''}
+            </div>)
     }
   }, {
     title: '申请人',

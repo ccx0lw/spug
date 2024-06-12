@@ -3,13 +3,14 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { observer } from 'mobx-react';
-import { Table, Modal, message } from 'antd';
+import { Table, Modal, message, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { Action, TableCard, AuthButton } from 'components';
 import { http, hasPermission, history } from 'libs';
 import store from './store';
+import tagStore from 'pages/config/tag/store';
 
 @observer
 class ComTable extends React.Component {
@@ -41,6 +42,9 @@ class ComTable extends React.Component {
     if (store.f_name) {
       data = data.filter(item => item['name'].toLowerCase().includes(store.f_name.toLowerCase()))
     }
+    if (store.f_tag) {
+      data = data.filter(item => item['rel_tags'].includes(store.f_tag));
+    }
     return (
       <TableCard
         tKey="ca"
@@ -63,6 +67,16 @@ class ComTable extends React.Component {
           pageSizeOptions: ['10', '20', '50', '100']
         }}>
         <Table.Column title="应用名称" dataIndex="name"/>
+        <Table.Column
+          title="标签"
+          render={(info) => (
+            <div>
+              {info.rel_tags?.length > 0 ? info.rel_tags.map(tid => (
+                <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{tagStore.records.find(item => item.id === tid)?.name}</Tag>
+              )) : ''}
+            </div>
+          )}
+        />
         <Table.Column title="标识符" dataIndex="key"/>
         <Table.Column ellipsis title="描述信息" dataIndex="desc"/>
         {hasPermission('config.app.edit|config.app.del|config.app.view_config') && (

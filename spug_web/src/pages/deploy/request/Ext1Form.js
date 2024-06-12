@@ -162,12 +162,12 @@ export default observer(function () {
       maskClosable={false}
       title={
         <div>
+          {env.env_name ? <Tag color="#108ee9">{env.env_name}</Tag> : ''}
           {store.record.id ? '编辑' : '新建'}<b>【{env.app_name}】</b>发布申请&ensp;
-          {env.env_prod ? <Tag color="#f50">生产环境</Tag> : ''}
-          {<Tag color="#2db7f5">{env.env_name}</Tag>}
           {env.app_rel_tags?.length > 0 ? env.app_rel_tags.map(tid => (
-              <Tag>{appTags.find(item => item.id === tid).name}</Tag>
+              <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{appTags.find(item => item.id === tid).name}</Tag>
             )) : ''}
+          {env.env_prod ? <Tag color="#f50">生产环境</Tag> : ''}
         </div>
       }
       onCancel={() => store.ext1Visible = false}

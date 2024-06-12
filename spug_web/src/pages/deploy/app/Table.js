@@ -20,6 +20,7 @@ import CloneConfirm from './CloneConfirm';
 import store from './store';
 import envStore from 'pages/config/environment/store';
 import lds from 'lodash';
+import tagStore from 'pages/config/tag/store';
 
 function ComTable() {
   function handleClone(e, id) {
@@ -77,7 +78,8 @@ function ComTable() {
   }
 
   function handleExpand(expanded, row) {
-    if (expanded && !row.isLoaded) {
+    // 去掉row.isLoaded保证每次展开都会加载最新的，不然展开后会缓存一次，之后就不会再读取最新的
+    if (expanded) {
       store.loadDeploys(row.id)
     }
   }
@@ -149,6 +151,16 @@ function ComTable() {
         </div>
       )}/>
       <Table.Column title="应用名称" dataIndex="name"/>
+      <Table.Column
+          title="标签"
+          render={(info) => (
+            <div>
+              {info.rel_tags?.length > 0 ? info.rel_tags.map(tid => (
+                <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{tagStore.records.find(item => item.id === tid)?.name}</Tag>
+              )) : ''}
+            </div>
+          )}
+        />
       <Table.Column title="标识符" dataIndex="key"/>
       <Table.Column ellipsis title="描述信息" dataIndex="desc"/>
       {hasPermission('deploy.app.edit|deploy.app.del') && (

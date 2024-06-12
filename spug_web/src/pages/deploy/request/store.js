@@ -21,6 +21,7 @@ class Store {
   @observable approveVisible = false;
   @observable rollbackVisible = false;
 
+  @observable f_tag;
   @observable f_status = 'all';
   @observable f_app_id;
   @observable f_env_id;
@@ -29,6 +30,7 @@ class Store {
 
   @computed get dataSource() {
     let data = this.records;
+    if (this.f_tag)    data = data.filter(x => x.app_rel_tags.includes(this.f_tag))
     if (this.f_app_id) data = data.filter(x => x.app_id === this.f_app_id)
     if (this.f_env_id) data = data.filter(x => x.env_id === this.f_env_id)
     if (this.f_s_date) data = data.filter(x => {

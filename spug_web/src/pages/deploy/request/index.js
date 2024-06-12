@@ -33,6 +33,8 @@ function Index() {
     return () => store.leaveConsole()
   }, [])
 
+  const tags = tagStore.records
+
   return (
     <AuthDiv auth="deploy.request.view">
       <Breadcrumb>
@@ -41,7 +43,16 @@ function Index() {
         <Breadcrumb.Item>发布申请</Breadcrumb.Item>
       </Breadcrumb>
       <SearchForm>
-        <SearchForm.Item span={6} title="发布环境">
+        <SearchForm.Item span={7} title="标签">
+          <Select allowClear value={store.f_tag} onChange={e => store.f_tag = e} placeholder="请选择">
+            { tags.map(item => (
+              <Select.Option key={item.id} value={item.id}>
+                <span>{item.name}</span>
+              </Select.Option>
+            ))}
+          </Select>
+        </SearchForm.Item>
+        <SearchForm.Item span={7} title="发布环境">
           <Select
             allowClear
             showSearch
@@ -54,7 +65,7 @@ function Index() {
             ))}
           </Select>
         </SearchForm.Item>
-        <SearchForm.Item span={6} title="应用名称">
+        <SearchForm.Item span={7} title="应用名称">
           <Select
             allowClear
             showSearch
@@ -67,7 +78,7 @@ function Index() {
             ))}
           </Select>
         </SearchForm.Item>
-        <SearchForm.Item span={8} title="申请时间">
+        <SearchForm.Item span={8} title="时间">
           <DatePicker.RangePicker
             value={store.f_s_date ? [moment(store.f_s_date), moment(store.f_e_date)] : undefined}
             onChange={store.updateDate}/>

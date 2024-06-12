@@ -33,6 +33,7 @@ class RequestView(View):
                 env_name=F('deploy__env__name'),
                 app_id=F('deploy__app_id'),
                 app_name=F('deploy__app__name'),
+                app_rel_tags=F('deploy__app__rel_tags'),
                 app_host_ids=F('deploy__host_ids'),
                 app_extend=F('deploy__extend'),
                 rep_extra=F('repository__extra'),
@@ -44,6 +45,7 @@ class RequestView(View):
             tmp['env_name'] = item.env_name
             tmp['app_id'] = item.app_id
             tmp['app_name'] = item.app_name
+            tmp['app_rel_tags'] = json.loads(item.app_rel_tags) if item.app_rel_tags else []
             tmp['app_extend'] = item.app_extend
             tmp['host_ids'] = json.loads(item.host_ids)
             tmp['fail_host_ids'] = json.loads(item.fail_host_ids)

@@ -14,6 +14,7 @@ class Store {
   @observable formVisible = false;
   @observable relVisible = false;
 
+  @observable f_tag;
   @observable f_name;
 
   fetchRecords = () => {

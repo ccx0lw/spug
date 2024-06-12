@@ -5,27 +5,40 @@
  */
 import React from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Steps } from 'antd';
+import { Modal, Steps, Tag } from 'antd';
 import Setup1 from './Ext1Setup1';
 import Setup2 from './Ext1Setup2';
 import Setup3 from './Ext1Setup3';
 import store from './store';
 import styles from './index.module.css';
+import tagStore from 'pages/config/tag/store';
 
 export default observer(function Ext1From() {
   const appName = store.currentRecord.name;
-  let title = `常规发布 - ${appName}`;
+  let title = `常规发布 - 【${appName}】`;
   if (store.deploy.id) {
     store.isReadOnly ? title = '查看' + title : title = '编辑' + title;
   } else {
     title = '新建' + title
   }
+
+  const appTags = tagStore.records
+
   return (
     <Modal
       visible
       width={800}
       maskClosable={false}
-      title={title}
+      title={
+        <div>
+          {store.deploy.env_name ? <Tag color="#108ee9">{store.deploy.env_name}</Tag> : ''}
+          {title}
+          {store.deploy.app_rel_tags?.length > 0 ? store.deploy.app_rel_tags.map(tid => (
+              <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{appTags.find(item => item.id === tid).name}</Tag>
+            )) : ''}
+          {store.deploy.env_prod ? <Tag color="#f50">生产环境</Tag> : ''}
+        </div>
+      }
       onCancel={() => store.ext1Visible = false}
       footer={null}>
       <Steps current={store.page} className={styles.steps}>
