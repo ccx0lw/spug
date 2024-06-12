@@ -10,9 +10,11 @@ import { PlusOutlined } from '@ant-design/icons';
 import { Action, TableCard, AuthButton } from 'components';
 import { http, hasPermission } from 'libs';
 import store from './store';
+import tagStore from 'pages/config/tag/store';
 
 function ComTable() {
   const [loading, setLoading] = useState();
+  const tags = tagStore.records;
 
   function handleRebuild(info) {
     if (info.status === '5') {
@@ -70,7 +72,6 @@ function ComTable() {
       loading={store.isFetching}
       dataSource={store.dataSource}
       onReload={store.fetchRecords}
-      /*
       actions={[
         <AuthButton
           auth="deploy.docker_images.add"
@@ -78,7 +79,6 @@ function ComTable() {
           icon={<PlusOutlined/>}
           onClick={store.showForm}>新建</AuthButton>
       ]}
-      */
       expandable={{expandedRowRender, expandRowByClick: true}}
       pagination={{
         showSizeChanger: true,
@@ -87,6 +87,14 @@ function ComTable() {
         pageSizeOptions: ['10', '20', '50', '100']
       }}>
       <Table.Column title="应用" dataIndex="app_name"/>
+      <Table.Column title="标签" render={(info) => (
+        <div>
+          {info.app_rel_tags?.length > 0 ? info.app_rel_tags.map(tid => (
+            <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{tags.find(item => item.id === tid)?.name}</Tag>
+          )) : null}
+        </div>
+      )}
+      />
       <Table.Column title="最新版本" render={info => `${info.version}（${info.env_name}）`}/>
       <Table.Column title="构建时间" dataIndex="created_at"/>
       <Table.Column title="构建人" dataIndex="created_by_user"/>

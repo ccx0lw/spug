@@ -39,6 +39,8 @@ class DockerImages(models.Model, ModelMixin):
         tmp['status_alias'] = self.get_status_display()
         if hasattr(self, 'app_name'):
             tmp['app_name'] = self.app_name
+        if hasattr(self, 'app_rel_tags'):
+            tmp['app_rel_tags'] = json.loads(self.app_rel_tags) if self.app_rel_tags else []
         if hasattr(self, 'env_name'):
             tmp['env_name'] = self.env_name
         if hasattr(self, 'created_by_user'):

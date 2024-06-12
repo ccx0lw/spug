@@ -21,6 +21,7 @@ class DockerImagesView(View):
         deploy_id = request.GET.get('deploy_id')
         data = DockerImages.objects.filter(app_id__in=apps).annotate(
             app_name=F('app__name'),
+            app_rel_tags=F('app__rel_tags'),
             env_name=F('env__name'),
             created_by_user=F('created_by__nickname'))
         if deploy_id:

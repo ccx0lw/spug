@@ -16,11 +16,13 @@ class Store {
   @observable logVisible = false;
   @observable detailVisible = false;
 
+  @observable f_tag;
   @observable f_app_id;
   @observable f_env_id;
 
   @computed get dataSource() {
     let records = this.records;
+    if (this.f_tag)    records = records.filter(x => x.app_rel_tags.includes(this.f_tag));
     if (this.f_app_id) records = records.filter(x => x.app_id === this.f_app_id);
     if (this.f_env_id) records = records.filter(x => x.env_id === this.f_env_id);
     return records
