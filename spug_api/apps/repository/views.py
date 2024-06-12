@@ -43,7 +43,6 @@ class RepositoryView(View):
     def post(self, request):
         form, error = JsonParser(
             Argument('deploy_id', type=int, help='参数错误'),
-            Argument('version', help='请输入构建版本'),
             Argument('extra', type=list, help='参数错误'),
             Argument('remarks', required=False)
         ).parse(request.body)
@@ -51,8 +50,29 @@ class RepositoryView(View):
             deploy = Deploy.objects.filter(pk=form.deploy_id).first()
             if not deploy:
                 return json_response(error='未找到指定发布配置')
+            if form.extra[0] == 'tag':
+                if not form.extra[1]:
+                    return json_response(error='请选择要发布的版本')
+                form.version = form.extra[1]
+            elif form.extra[0] == 'branch':
+                if not form.extra[2]:
+                    return json_response(error='请选择要发布的分支及Commit ID')
+                form.version = f'{form.extra[1]}#{form.extra[2][:6]}'
+            else:
+                return json_response(error='参数错误')
+
+            # 获取环境，对应的环境是否是生产环境。 是则form.extra[0]只能是tag
+            if (deploy.env.prod and form.extra[0] != 'tag'):
+                if (form.extra[0] == 'repository'):
+                    if (form.extra[1] != 'tag'):
+                        return json_response(error='生产环境只能选择tag代码')
+                else:
+                    return json_response(error='生产环境只能选择tag代码')
+
             form.extra = json.dumps(form.extra)
             form.spug_version = Repository.make_spug_version(deploy.id)
+
+            # form.version = form.spug_version
             rep = Repository.objects.create(
                 app_id=deploy.app_id,
                 env_id=deploy.env_id,

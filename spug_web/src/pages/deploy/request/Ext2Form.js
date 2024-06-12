@@ -24,7 +24,7 @@ export default observer(function () {
   const [host_ids, setHostIds] = useState([]);
   const [plan, setPlan] = useState(store.record.plan);
   const [env, setEnv] = useState({});
-  const [appTags, setAppTags] = useState({})
+  const [appTags, setAppTags] = useState([])
 
   useEffect(() => {
     fetchData();

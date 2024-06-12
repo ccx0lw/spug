@@ -28,7 +28,7 @@ export default observer(function () {
     }
   }, [])
 
-  const tags = tagStore.records
+  const tags = tagStore.records || []
 
   return (
     <AuthDiv auth="deploy.app.view">

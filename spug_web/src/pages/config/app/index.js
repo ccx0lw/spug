@@ -19,7 +19,7 @@ export default observer(function () {
     if (tagStore.records.length === 0) tagStore.fetchRecords()
   }, [])
 
-  const tags = tagStore.records
+  const tags = tagStore.records || []
 
   return (
     <AuthDiv auth="config.app.view">

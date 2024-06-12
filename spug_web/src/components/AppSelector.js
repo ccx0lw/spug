@@ -23,6 +23,7 @@ export default observer(function AppSelector(props) {
 
   useEffect(() => {
     setFetching(true);
+
     http.get('/api/app/deploy/')
       .then(res => setDeploys(res))
       .finally(() => setFetching(false))
@@ -35,6 +36,7 @@ export default observer(function AppSelector(props) {
       tagStore.fetchRecords()
     }
     return () => {
+      setFetching(false);
     };
   }, [])
 
@@ -49,7 +51,7 @@ export default observer(function AppSelector(props) {
   if (search_tag) records = records.filter(x => x['app_rel_tags'].includes(search_tag));
   if (props.filter) records = records.filter(x => props.filter(x));
 
-  const tags = tagStore.records
+  const tags = tagStore.records || []
 
   return (
     <Modal

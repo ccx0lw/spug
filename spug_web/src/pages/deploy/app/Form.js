@@ -13,7 +13,7 @@ import tagStore from 'pages/config/tag/store';
 export default observer(function () {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const tags = tagStore.records;
+  const tags = tagStore.records || [];
 
   function handleSubmit() {
     setLoading(true);

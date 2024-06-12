@@ -6,10 +6,11 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { LoadingOutlined, SyncOutlined } from '@ant-design/icons';
-import { Modal, Form, Input, Select, Button, message } from 'antd';
+import { Modal, Form, Input, Select, Button, message, Tag } from 'antd';
 import http from 'libs/http';
 import store from './store';
 import lds from 'lodash';
+import tagStore from 'pages/config/tag/store';
 
 export default observer(function () {
   const [form] = Form.useForm();
@@ -20,10 +21,12 @@ export default observer(function () {
   const [extra1, setExtra1] = useState();
   const [extra2, setExtra2] = useState();
   const [versions, setVersions] = useState({});
+  const [appTags, setAppTags] = useState([])
 
   useEffect(() => {
     fetchVersions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    setAppTags(tagStore.records)
   }, [])
 
   function _setDefault(type, new_extra, new_versions) {
@@ -52,10 +55,17 @@ export default observer(function () {
       for (let item of store.records) {
         if (item.deploy_id === store.deploy.id) {
           const type = item.extra[0];
+          if (store.deploy.env_prod && type !== 'tag') {
+            continue;
+          }
           setExtra(item.extra);
           setGitType(type);
           return _setDefault(type, item.extra, versions);
         }
+      }
+      if (store.deploy.env_prod) {
+        setGitType('tag');
+        return
       }
       setGitType('branch');
       const branch = lds.get(Object.keys(branches), 0);
@@ -101,19 +111,29 @@ export default observer(function () {
   }
 
   const {branches, tags} = versions;
+
   return (
     <Modal
       visible
       width={800}
       maskClosable={false}
-      title="新建构建"
+      title={
+        <div>
+          {store.deploy.env_name ? <Tag color="#108ee9">{store.deploy.env_name}</Tag> : null}
+          <span>新建构建【<b>{store.deploy.app_name}</b>】</span>
+          {store.deploy.app_rel_tags?.length > 0 && Array.isArray(appTags) ? store.deploy.app_rel_tags.map(tid => (
+            appTags.find(item => item.id === tid) ? <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{appTags.find(item => item.id === tid).name}</Tag> : null
+          )) : null}
+          {store.deploy.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+        </div>
+      }
       onCancel={() => store.formVisible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
       <Form form={form} initialValues={store.record} labelCol={{span: 5}} wrapperCol={{span: 17}}>
-        <Form.Item required name="version" label="构建版本">
+        {/* <Form.Item required name="version" label="构建版本">
           <Input placeholder="请输入构建版本"/>
-        </Form.Item>
+        </Form.Item> */}
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
             根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"
@@ -122,7 +142,7 @@ export default observer(function () {
           <Form.Item style={{display: 'inline-block', marginBottom: 0, width: '450px'}}>
             <Input.Group compact>
               <Select value={git_type} onChange={switchType} style={{width: 100}}>
-                <Select.Option value="branch">Branch</Select.Option>
+                <Select.Option disabled={store.deploy.env_prod} value="branch">Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
               </Select>
               <Select
@@ -133,7 +153,7 @@ export default observer(function () {
                 onChange={switchExtra1}
                 filterOption={(input, option) => option.props.children.toLowerCase().indexOf(input.toLowerCase()) >= 0}>
                 {git_type === 'branch' ? (
-                  Object.keys(branches || {}).map(b => <Select.Option key={b} value={b}>{b}</Select.Option>)
+                  Object.keys(store.deploy.env_prod ? {} : (branches || {})).map(b => <Select.Option key={b} value={b}>{b}</Select.Option>)
                 ) : (
                   Object.entries(tags || {}).map(([tag, info]) => (
                     <Select.Option key={tag} value={tag}>
@@ -157,7 +177,7 @@ export default observer(function () {
             }
           </Form.Item>
         </Form.Item>
-        {git_type === 'branch' && (
+        {!store.deploy.env_prod && git_type === 'branch' && (
           <Form.Item required label="选择Commit ID">
             <Select value={extra2} placeholder="请选择" onChange={v => setExtra2(v)}>
               {extra1 && branches ? branches[extra1].map(item => (

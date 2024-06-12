@@ -33,7 +33,7 @@ function Index() {
     return () => store.leaveConsole()
   }, [])
 
-  const tags = tagStore.records
+  const tags = tagStore.records || []
 
   return (
     <AuthDiv auth="deploy.request.view">

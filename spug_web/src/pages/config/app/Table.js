@@ -3,7 +3,7 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { observer } from 'mobx-react';
 import { Table, Modal, message, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
@@ -73,7 +73,7 @@ class ComTable extends React.Component {
             <div>
               {info.rel_tags?.length > 0 ? info.rel_tags.map(tid => (
                 <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{tagStore.records.find(item => item.id === tid)?.name}</Tag>
-              )) : ''}
+              )) : null}
             </div>
           )}
         />

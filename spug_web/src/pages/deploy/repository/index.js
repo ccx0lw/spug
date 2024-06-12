@@ -15,13 +15,18 @@ import Detail from './Detail';
 import store from './store';
 import envStore from 'pages/config/environment/store';
 import appStore from 'pages/config/app/store';
+import tagStore from 'pages/config/tag/store';
 
 export default observer(function () {
   useEffect(() => {
     store.fetchRecords();
     if (!appStore.records.length) appStore.fetchRecords()
     if (!envStore.records.length) envStore.fetchRecords()
+    if (!tagStore.records.length) tagStore.fetchRecords()
   }, [])
+
+  const tags = tagStore.records || []
+
   return (
     <AuthDiv auth="deploy.repository.view">
       <Breadcrumb>
@@ -30,6 +35,15 @@ export default observer(function () {
         <Breadcrumb.Item>构建仓库</Breadcrumb.Item>
       </Breadcrumb>
       <SearchForm>
+        <SearchForm.Item span={7} title="标签">
+          <Select allowClear value={store.f_tag} onChange={e => store.f_tag = e} placeholder="请选择">
+            { tags.map(item => (
+              <Select.Option key={item.id} value={item.id}>
+                <span>{item.name}</span>
+              </Select.Option>
+            ))}
+          </Select>
+        </SearchForm.Item>
         <SearchForm.Item span={6} title="应用">
           <Select
             allowClear

@@ -42,7 +42,7 @@ export default observer(function () {
   const [extra2, setExtra2] = useState();
   const [versions, setVersions] = useState({});
   const [env, setEnv] = useState({});
-  const [appTags, setAppTags] = useState({})
+  const [appTags, setAppTags] = useState([])
   useEffect(() => {
     const {app_host_ids, host_ids} = store.record;
     setHostIds(lds.clone(host_ids || app_host_ids));
