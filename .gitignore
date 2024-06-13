@@ -1,3 +1,4 @@
 /.idea/
 dump.rdb
 nohup.out
+package-lock.json

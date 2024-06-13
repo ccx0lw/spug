@@ -5,6 +5,7 @@
 ```python
 cd /data/spug/spug_api
 python3 -m venv venv
+# windows 使用 venv\Scripts\activate.bat
 source venv/bin/activate
 pip install -U pip setuptools
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
@@ -50,7 +51,7 @@ npm start
 ### 访问测试
 http://localhost:3000
 用户名：admin  
-密码：spug.dev
+密码：spug.cc
 
 
 
