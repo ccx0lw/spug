@@ -24,33 +24,18 @@ export default observer(function () {
     setLoading(true);
     const info = store.deploy;
     info['app_id'] = store.app_id;
-    info['extend'] = '1';
+    info['extend'] = '3';
     http.post('/api/app/deploy/', info)
       .then(() => {
         message.success('保存成功');
         store.loadDeploys(store.app_id);
-        store.ext1Visible = false
+        store.ext3Visible = false
       }, () => setLoading(false))
   }
 
   const info = store.deploy;
   return (
     <Form layout="vertical" style={{padding: '0 120px'}}>
-      <Form.Item required label="部署路径" tooltip="应用最终在主机上的部署路径，为了数据安全请确保该目录不存在，Spug 将会自动创建并接管该目录，可使用全局变量，例如：/www/$SPUG_APP_KEY">
-        <Input value={info['dst_dir']} onChange={e => info['dst_dir'] = e.target.value} placeholder="请输入部署目标路径"/>
-      </Form.Item>
-      <Row gutter={24}>
-        <Col span={14}>
-          <Form.Item required label="存储路径" tooltip="此目录用于存储应用的历史版本，可使用全局变量，例如：/data/repos/$SPUG_APP_KEY">
-            <Input value={info['dst_repo']} onChange={e => info['dst_repo'] = e.target.value} placeholder="请输入部署目标路径"/>
-          </Form.Item>
-        </Col>
-        <Col span={10}>
-          <Form.Item required label="版本数量" tooltip="早于指定数量的构建纪录及历史版本会被删除，以释放磁盘空间。">
-            <Input value={info['versions']} onChange={e => info['versions'] = e.target.value} placeholder="请输入保存的版本数量"/>
-          </Form.Item>
-        </Col>
-      </Row>
       <Form.Item
         label="应用发布前执行"
         tooltip="在发布的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。"

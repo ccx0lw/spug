@@ -31,6 +31,7 @@ class RequestView(View):
         for item in DeployRequest.objects.filter(**query).annotate(
                 env_id=F('deploy__env_id'),
                 env_name=F('deploy__env__name'),
+                env_prod=F('deploy__env__prod'),
                 app_id=F('deploy__app_id'),
                 app_name=F('deploy__app__name'),
                 app_rel_tags=F('deploy__app__rel_tags'),
@@ -43,6 +44,7 @@ class RequestView(View):
             tmp = item.to_dict()
             tmp['env_id'] = item.env_id
             tmp['env_name'] = item.env_name
+            tmp['env_prod'] = item.env_prod
             tmp['app_id'] = item.app_id
             tmp['app_name'] = item.app_name
             tmp['app_rel_tags'] = json.loads(item.app_rel_tags) if item.app_rel_tags else []

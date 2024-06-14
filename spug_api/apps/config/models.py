@@ -2,8 +2,10 @@
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
 from django.db import models
+from django.db.models import UniqueConstraint
 from libs import ModelMixin, human_datetime
 from apps.account.models import User
+import json
 
 
 class Environment(models.Model, ModelMixin):
@@ -104,3 +106,39 @@ class Tag(models.Model, ModelMixin):
     class Meta:
         db_table = 'tags'
         ordering = ('-sort_id',)
+        
+class FileTemplate(models.Model, ModelMixin):
+    TYPES = (
+        ('dockerfile', 'Dockerfile'),
+        ('yaml', 'k8s.yaml')
+    )
+    name = models.CharField(max_length=50)
+    env_id = models.IntegerField()
+    type = models.CharField(max_length=5, choices=TYPES)
+    body = models.TextField()
+    parameters = models.TextField(default='[]')
+    desc = models.CharField(max_length=255, null=True)
+    created_at = models.CharField(max_length=20, default=human_datetime)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT)
+    updated_at = models.CharField(max_length=20, null=True)
+    updated_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
+    
+    def __repr__(self):
+        return f'<FileTemplate {self.name!r}>'
+    
+    def to_view(self):
+        tmp = self.to_dict()
+        tmp['parameters'] = json.loads(self.parameters)
+        return tmp
+    
+    def save(self, *args, **kwargs):
+        type_to_name = dict(self.TYPES)
+        self.name = type_to_name.get(self.type, 'Default Name')
+        super(FileTemplate, self).save(*args, **kwargs)
+
+    class Meta:
+        db_table = 'file_template'
+        ordering = ('-id',)
+        constraints = [
+            UniqueConstraint(fields=['env_id', 'type'], name='unique_env_id_type')
+        ]

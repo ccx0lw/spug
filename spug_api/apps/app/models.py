@@ -41,6 +41,7 @@ class Deploy(models.Model, ModelMixin):
     EXTENDS = (
         ('1', '常规发布'),
         ('2', '自定义发布'),
+        ('3', '容器发布'),
     )
     app = models.ForeignKey(App, on_delete=models.PROTECT)
     env = models.ForeignKey(Environment, on_delete=models.PROTECT)
@@ -56,7 +57,7 @@ class Deploy(models.Model, ModelMixin):
 
     @property
     def extend_obj(self):
-        cls = DeployExtend1 if self.extend == '1' else DeployExtend2
+        cls = DeployExtend1 if self.extend == '1' else DeployExtend2 if self.extend == '2' else DeployExtend3
         return cls.objects.filter(deploy=self).first()
 
     def to_dict(self, *args, **kwargs):
@@ -128,3 +129,28 @@ class DeployExtend2(models.Model, ModelMixin):
 
     class Meta:
         db_table = 'deploy_extend2'
+
+class DeployExtend3(models.Model, ModelMixin):
+    deploy = models.OneToOneField(Deploy, primary_key=True, on_delete=models.CASCADE)
+    git_repo = models.CharField(max_length=255)
+    dst_dir = models.CharField(max_length=255)
+    dst_repo = models.CharField(max_length=255)
+    versions = models.IntegerField()
+    filter_rule = models.TextField()
+    hook_pre_server = models.TextField(null=True)
+    hook_post_server = models.TextField(null=True)
+    hook_pre_image = models.TextField(null=True)
+    hook_post_image = models.TextField(null=True)
+    hook_pre_host = models.TextField(null=True)
+    hook_post_host = models.TextField(null=True)
+
+    def to_dict(self, *args, **kwargs):
+        tmp = super().to_dict(*args, **kwargs)
+        tmp['filter_rule'] = json.loads(self.filter_rule)
+        return tmp
+
+    def __repr__(self):
+        return '<DeployExtend3 deploy_id=%r>' % self.deploy_id
+
+    class Meta:
+        db_table = 'deploy_extend3'

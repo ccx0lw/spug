@@ -348,12 +348,7 @@ class TagView(View):
             Argument('id', type=int, required=False)
         ).parse(request.GET)
         if error is None:
-            if request.user.is_supper:
-                tags = Tag.objects.all()
-            else:
-                ids = request.user.deploy_perms['apps']
-                tags = Tag.objects.filter(id__in=ids)
-
+            tags = Tag.objects.all()
             if form.id:
                 tag = tags.filter(pk=form.id).first()
                 return json_response(tag)
@@ -410,10 +405,9 @@ class TagView(View):
             Argument('id', type=int, help='请指定操作对象')
         ).parse(request.GET)
         if error is None:
-            # TODO 在应用中关联不能使用
+            # TODO 在应用中关联不能删除
             # if App.objects.filter(app_id=form.id).exists():
             #     return json_response(error='该应用在应用发布中已存在关联的发布配置，请删除相关发布配置后再尝试删除')
-            # auto delete configs
             # Config.objects.filter(type='app', o_id=form.id).delete()
             # ConfigHistory.objects.filter(type='app', o_id=form.id).delete()
             # for tag in Tag.objects.filter(rel_apps__isnull=False):
@@ -423,4 +417,49 @@ class TagView(View):
             #         app.rel_apps = json.dumps(rel_apps)
             #         app.save()
             Tag.objects.filter(pk=form.id).delete()
+        return json_response(error=error)
+    
+class FileTemplateView(View):
+    @auth('file.template.view')
+    def get(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, required=False)
+        ).parse(request.GET)
+        if error is None:
+            templates = FileTemplate.objects.all()
+            if form.id:
+                template = templates.filter(pk=form.id).first()
+                if template:
+                    return json_response(template.to_view())
+            else:
+                templates = [t.to_view() for t in templates]
+        return json_response(templates)
+
+    @auth('file.template.add|file.template.edit')
+    def post(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, required=False),
+            Argument('type', help='请选择模版类型'),
+            Argument('env_id', help='请选择环境'),
+            Argument('body', help='请输入模版内容'),
+            Argument('parameters', type=list, handler=json.dumps, default=[]),
+            Argument('desc', required=False)
+        ).parse(request.body)
+        if error is None:
+            if form.id:
+                form.updated_at = human_datetime()
+                form.updated_by = request.user
+                FileTemplate.objects.filter(pk=form.pop('id')).update(**form)
+            else:
+                form.created_by = request.user
+                FileTemplate.objects.create(**form)
+        return json_response(error=error)
+
+    @auth('file.template.del')
+    def delete(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, help='请指定操作对象')
+        ).parse(request.GET)
+        if error is None:
+            FileTemplate.objects.filter(pk=form.id).delete()
         return json_response(error=error)

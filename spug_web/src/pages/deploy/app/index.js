@@ -11,6 +11,7 @@ import ComTable from './Table';
 import ComForm from './Form';
 import Ext1Form from './Ext1Form';
 import Ext2Form from './Ext2Form';
+import Ext3Form from './Ext3Form';
 import AddSelect from './AddSelect';
 import AutoDeploy from './AutoDeploy';
 import store from './store';
@@ -59,6 +60,7 @@ export default observer(function () {
       {store.addVisible && <AddSelect/>}
       {store.ext1Visible && <Ext1Form/>}
       {store.ext2Visible && <Ext2Form/>}
+      {store.ext3Visible && <Ext3Form/>}
       {store.autoVisible && <AutoDeploy/>}
     </AuthDiv>
   );

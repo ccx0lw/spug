@@ -7,7 +7,7 @@ from apps.account.models import History, User
 from apps.alarm.models import Alarm
 from apps.schedule.models import Task, History as TaskHistory
 from apps.deploy.models import DeployRequest
-from apps.app.models import DeployExtend1
+from apps.app.models import DeployExtend1, DeployExtend3
 from apps.exec.models import ExecHistory, Transfer
 from apps.notify.models import Notify
 from apps.deploy.utils import dispatch
@@ -29,6 +29,13 @@ def auto_run_by_day():
         Notify.objects.filter(created_at__lt=date_7, unread=False).delete()
         Alarm.objects.filter(created_at__lt=date_30).delete()
         for item in DeployExtend1.objects.all():
+            index = 0
+            for req in DeployRequest.objects.filter(deploy_id=item.deploy_id, repository_id__isnull=False):
+                if index > item.versions and req.repository_id:
+                    req.repository.delete()
+                index += 1
+                
+        for item in DeployExtend3.objects.all():
             index = 0
             for req in DeployRequest.objects.filter(deploy_id=item.deploy_id, repository_id__isnull=False):
                 if index > item.versions and req.repository_id:

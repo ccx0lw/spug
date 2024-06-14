@@ -4,7 +4,7 @@
 from django.views.generic import View
 from django.db.models import F
 from libs import JsonParser, Argument, json_response, auth
-from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2
+from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2, DeployExtend3
 from apps.config.models import Config, ConfigHistory, Service
 from apps.app.utils import fetch_versions, remove_repo
 from apps.setting.utils import AppSetting
@@ -186,6 +186,31 @@ class DeployView(View):
                 else:
                     deploy = Deploy.objects.create(created_by=request.user, **form)
                     DeployExtend2.objects.create(deploy=deploy, **extend_form)
+            if form.extend == '3':
+                extend_form, error = JsonParser(
+                    Argument('git_repo', handler=str.strip, help='请输入git仓库地址'),
+                    Argument('dst_dir', handler=str.strip, help='请输入发布部署路径'),
+                    Argument('dst_repo', handler=str.strip, help='请输入发布存储路径'),
+                    Argument('versions', type=int, filter=lambda x: x > 0, help='请输入发布保留版本数量'),
+                    Argument('filter_rule', type=dict, help='参数错误'),
+                    Argument('hook_pre_server', handler=str.strip, default=''),
+                    Argument('hook_post_server', handler=str.strip, default=''),
+                    Argument('hook_pre_host', handler=str.strip, default=''),
+                    Argument('hook_post_host', handler=str.strip, default='')
+                ).parse(request.body)
+                if error:
+                    return json_response(error=error)
+                extend_form.dst_dir = extend_form.dst_dir.rstrip('/')
+                extend_form.filter_rule = json.dumps(extend_form.filter_rule)
+                if form.id:
+                    extend = DeployExtend3.objects.filter(deploy_id=form.id).first()
+                    if extend.git_repo != extend_form.git_repo:
+                        remove_repo(form.id)
+                    Deploy.objects.filter(pk=form.id).update(**form)
+                    DeployExtend3.objects.filter(deploy_id=form.id).update(**extend_form)
+                else:
+                    deploy = Deploy.objects.create(created_by=request.user, **form)
+                    DeployExtend3.objects.create(deploy=deploy, **extend_form)
         return json_response(error=error)
 
     @auth('deploy.app.del')

@@ -150,6 +150,24 @@ export default [{
       {key: 'view_config', label: '查看配置'},
       {key: 'edit_config', label: '修改配置'},
     ]
+  }, {
+    key: 'tag',
+    label: '标签管理',
+    perms: [
+      {key: 'view', label: '查看标签'},
+      {key: 'add', label: '新建标签'},
+      {key: 'edit', label: '编辑标签'},
+      {key: 'del', label: '删除标签'},
+    ]
+  }, {
+    key: 'template.file',
+    label: '模板文件管理',
+    perms: [
+      {key: 'view', label: '查看模板文件'},
+      {key: 'add', label: '新建模板文件'},
+      {key: 'edit', label: '编辑模板文件'},
+      {key: 'del', label: '删除模板文件'},
+    ]
   }]
 }, {
   key: 'monitor',

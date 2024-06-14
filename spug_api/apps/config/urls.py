@@ -14,4 +14,5 @@ urlpatterns = [
     path('service/', ServiceView.as_view()),
     path('history/', HistoryView.as_view()),
     path('tag/', TagView.as_view()),
+    path('file/template/', FileTemplateView.as_view()),
 ]

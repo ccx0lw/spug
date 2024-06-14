@@ -33,6 +33,7 @@ import ConfigService from './pages/config/service';
 import ConfigApp from './pages/config/app';
 import ConfigSetting from './pages/config/setting';
 import ConfigTag from './pages/config/tag';
+import ConfigTemplateFile from './pages/config/file/template';
 import MonitorIndex from './pages/monitor';
 import AlarmIndex from './pages/alarm/alarm';
 import AlarmGroup from './pages/alarm/group';
@@ -77,11 +78,12 @@ export default [
     component: ScheduleIndex
   },
   {
-    icon: <DeploymentUnitOutlined/>, title: '配置中心', auth: 'config.env.view|config.src.view|config.app.view', child: [
+    icon: <DeploymentUnitOutlined/>, title: '配置中心', auth: 'config.env.view|config.src.view|config.app.view|config.tag.view|config.template.file.view', child: [
       {title: '环境管理', auth: 'config.env.view', path: '/config/environment', component: ConfigEnvironment},
       {title: '服务配置', auth: 'config.src.view', path: '/config/service', component: ConfigService},
       {title: '应用配置', auth: 'config.app.view', path: '/config/app', component: ConfigApp},
       {title: '标签配置', auth: 'config.tag.view', path: '/config/tag', component: ConfigTag},
+      {title: '模板文件', auth: 'config.template.file.view', path: '/config/file/template', component: ConfigTemplateFile},
       {path: '/config/setting/:type/:id', component: ConfigSetting},
     ]
   },

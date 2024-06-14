@@ -10,6 +10,8 @@ import 'ace-builds/src-noconflict/mode-text';
 import 'ace-builds/src-noconflict/mode-json';
 import 'ace-builds/src-noconflict/mode-space';
 import 'ace-builds/src-noconflict/mode-python';
+import 'ace-builds/src-noconflict/mode-yaml';
+import 'ace-builds/src-noconflict/mode-dockerfile';
 import 'ace-builds/src-noconflict/theme-tomorrow';
 
 export default function (props) {

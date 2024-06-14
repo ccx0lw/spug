@@ -44,7 +44,12 @@ function ComTable() {
         <Table.Column title="版本" render={info => (
           <div style={{color: '#1890ff', cursor: 'pointer'}} onClick={() => store.showDetail(info)}>{info.version}</div>
         )}/>
-        <Table.Column title="环境" dataIndex="env_name"/>
+        <Table.Column title="环境" render={(info) => (
+          <div>
+            {info.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+            {info.env_name}
+          </div>
+        )}/>
         <Table.Column title="构建时间" dataIndex="created_at"/>
         <Table.Column title="备注" dataIndex="remarks"/>
         <Table.Column title="状态" render={info => <Tag color={statusColorMap[info.status]}>{info.status_alias}</Tag>}/>

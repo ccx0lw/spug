@@ -10,10 +10,11 @@ import {
   DownSquareOutlined,
   ExclamationCircleOutlined,
   OrderedListOutlined,
+  ContainerOutlined,
   UpSquareOutlined,
   PlusOutlined
 } from '@ant-design/icons';
-import { Table, Modal, Tag, Divider, message } from 'antd';
+import { Table, Modal, Tag, Divider, message, Tooltip } from 'antd';
 import { http, hasPermission } from 'libs';
 import { Action, TableCard, AuthButton } from "components";
 import CloneConfirm from './CloneConfirm';
@@ -91,10 +92,19 @@ function ComTable() {
         loading={record['deploys'] === undefined}
         dataSource={record['deploys']}
         pagination={false}>
-        <Table.Column width={80} title="模式" dataIndex="extend" render={value => value === '1' ?
-          <OrderedListOutlined style={{fontSize: 20, color: '#1890ff'}}/> :
-          <BuildOutlined style={{fontSize: 20, color: '#1890ff'}}/>}/>
-        <Table.Column title="发布环境" dataIndex="env_id" render={value => lds.get(envStore.idMap, `${value}.name`)}/>
+        <Table.Column width={80} title="模式" dataIndex="extend" render={value => (
+            <div>
+              {value === '1' ? <Tooltip title="常规发布"><OrderedListOutlined style={{fontSize: 20, color: '#1890ff'}}/></Tooltip> : null}
+              {value === '2' ? <Tooltip title="自定义发布"><BuildOutlined style={{fontSize: 20, color: '#1890ff'}}/></Tooltip> : null}
+              {value === '3' ? <Tooltip title="容器发布"><ContainerOutlined style={{fontSize: 20, color: '#1890ff'}}/></Tooltip> : null}
+            </div>
+        )}/>
+        <Table.Column title="发布环境" render={(info) => (
+          <div>
+            {info.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+            {lds.get(envStore.idMap, `${info.env_id}.name`)}
+          </div>
+        )}/>
         <Table.Column title="关联主机" dataIndex="host_ids" render={value => `${value.length} 台`}/>
         <Table.Column title="发布审核" dataIndex="is_audit"
                       render={value => value ? <Tag color="green">开启</Tag> : <Tag color="red">关闭</Tag>}/>
