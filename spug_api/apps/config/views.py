@@ -449,7 +449,8 @@ class FileTemplateView(View):
             if form.id:
                 form.updated_at = human_datetime()
                 form.updated_by = request.user
-                FileTemplate.objects.filter(pk=form.pop('id')).update(**form)
+                name = FileTemplate.get_name_from_type(form.type)
+                FileTemplate.objects.filter(pk=form.pop('id')).update(name=name,**form)
             else:
                 form.created_by = request.user
                 FileTemplate.objects.create(**form)

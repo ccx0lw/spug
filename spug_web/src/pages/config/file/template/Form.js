@@ -100,7 +100,7 @@ export default observer(function () {
               mode={getFieldValue('type')}
               value={body}
               onChange={val => setBody(val)}
-              height="250px"/>
+              height="300px"/>
           )}
         </Form.Item>
         <Form.Item label="参数化">

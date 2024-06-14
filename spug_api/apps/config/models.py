@@ -131,9 +131,15 @@ class FileTemplate(models.Model, ModelMixin):
         tmp['parameters'] = json.loads(self.parameters)
         return tmp
     
+    @classmethod
+    def get_name_from_type(cls, type_key):
+        """根据类型获取名称的方法"""
+        type_to_name = dict(cls.TYPES)
+        return type_to_name.get(type_key, 'Default Name')
+    
     def save(self, *args, **kwargs):
         type_to_name = dict(self.TYPES)
-        self.name = type_to_name.get(self.type, 'Default Name')
+        self.name = self.get_name_from_type(self.type)
         super(FileTemplate, self).save(*args, **kwargs)
 
     class Meta:
