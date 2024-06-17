@@ -23,7 +23,7 @@ export default observer(function () {
         <SearchForm.Item span={8} title="模板类型">
           <Select allowClear value={store.f_type} onChange={v => store.f_type = v} placeholder="请选择">
             {store.FileTypes.map(item => (
-              <Select.Option value={item} key={item}>{item}</Select.Option>
+              <Select.Option value={item.value} key={item.key}>{item.key}</Select.Option>
             ))}
           </Select>
         </SearchForm.Item>
