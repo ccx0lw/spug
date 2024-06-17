@@ -71,8 +71,17 @@ export default observer(function Ext1Setup1() {
           <Link disabled={store.isReadOnly} to="/config/environment">新建环境</Link>
         </Form.Item>
       </Form.Item>
-      <Form.Item required label="目标主机" tooltip="该发布配置作用于哪些目标主机。">
+      <Form.Item required label="目标主机" tooltip="该发布配置作用于哪些目标主机。（执行K8S/Docker命令的机器）">
         <HostSelector value={info.host_ids} onChange={ids => info.host_ids = ids}/>
+      </Form.Item>
+      <Form.Item required label="部署路径" tooltip="应用最终在主机上的部署路径，为了数据安全请确保该目录不存在，Spug 将会自动创建并接管该目录，可使用全局变量，例如：/www/$SPUG_APP_KEY">
+        <Input defaultValue={"/var/spug/apps/$SPUG_ENV_KEY/$SPUG_APP_KEY"} value={info['dst_dir']} onChange={e => info['dst_dir'] = e.target.value} placeholder="请输入部署目标路径"/>
+      </Form.Item>
+      <Form.Item required label="存储路径" tooltip="此目录用于存储应用的历史版本，可使用全局变量，例如：/data/repos/$SPUG_APP_KEY">
+        <Input defaultValue={"/var/spug/repos/$SPUG_ENV_KEY/$SPUG_APP_KEY"} value={info['dst_repo']} onChange={e => info['dst_repo'] = e.target.value} placeholder="请输入部署目标路径"/>
+      </Form.Item>
+      <Form.Item required label="版本数量" tooltip="早于指定数量的构建纪录及历史版本会被删除，以释放磁盘空间。">
+        <Input defaultValue={1} value={info['versions']} onChange={e => info['versions'] = e.target.value} placeholder="请输入保存的版本数量"/>
       </Form.Item>
       <Form.Item required label="Git仓库地址" extra={<span className="btn" onClick={() => setVisible(true)}>私有仓库？</span>}>
         <Input disabled={store.isReadOnly} value={info['git_repo']} onChange={e => info['git_repo'] = e.target.value}

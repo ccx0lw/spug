@@ -25,7 +25,7 @@ import ExecTemplate from './pages/exec/template';
 import ExecTransfer from './pages/exec/transfer';
 import DeployApp from './pages/deploy/app';
 import DeployRepository from './pages/deploy/repository';
-import DeployDockerImages from './pages/deploy/docker.images';
+import DeployDockerImages from './pages/deploy/docker/images';
 import DeployRequest from './pages/deploy/request';
 import ScheduleIndex from './pages/schedule';
 import ConfigEnvironment from './pages/config/environment';
@@ -44,6 +44,7 @@ import SystemSetting from './pages/system/setting';
 import SystemLogin from './pages/system/login';
 import WelcomeIndex from './pages/welcome/index';
 import WelcomeInfo from './pages/welcome/info';
+import ContainerRepository from './pages/config/container/repository';
 
 export default [
   {icon: <DesktopOutlined/>, title: '工作台', path: '/home', component: HomeIndex},
@@ -84,6 +85,7 @@ export default [
       {title: '应用配置', auth: 'config.app.view', path: '/config/app', component: ConfigApp},
       {title: '标签配置', auth: 'config.tag.view', path: '/config/tag', component: ConfigTag},
       {title: '模板文件', auth: 'config.template.file.view', path: '/config/file/template', component: ConfigTemplateFile},
+      {title: '容器仓库', auth: 'config.container.repository.view', path: '/config/container/repository', component: ContainerRepository},
       {path: '/config/setting/:type/:id', component: ConfigSetting},
     ]
   },

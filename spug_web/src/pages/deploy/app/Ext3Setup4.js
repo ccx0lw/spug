@@ -3,16 +3,31 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React, { useState } from 'react';
+import React, {useState, useEffect} from 'react';
 import { observer } from 'mobx-react';
-import { Form, Button, Input, Row, Col, message } from 'antd';
+import { Form, Button, message, Card } from 'antd';
 import { ACEditor } from 'components';
 import { http, cleanCommand } from 'libs';
 import Tips from './Tips';
 import store from './store';
+import TemplateFileParameter from './TemplateFileParameter.js'
 
 export default observer(function () {
   const [loading, setLoading] = useState(false);
+  const [template, setTemplate] = useState({})
+  const [parameters, setParameters] = useState([])
+
+  const info = store.deploy;
+
+  useEffect(() => {
+    setLoading(true);
+    http.get('/api/config/file/template/?env_id='+info.env_id+'&type=yaml')
+      .then(res => {
+        setTemplate(res)
+        setParameters(res.parameters || [])
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   function handleSubmit() {
     const {dst_dir, dst_repo} = store.deploy;
@@ -33,9 +48,11 @@ export default observer(function () {
       }, () => setLoading(false))
   }
 
-  const info = store.deploy;
   return (
     <Form layout="vertical" style={{padding: '0 120px'}}>
+      <Card size="small" title={template.id > 0 ? (<span>发布模板yaml参数配置(<a target="_blank" href='/config/file/template'>查看</a>)</span>) : (<span>当前环境不存在yaml模板文件(<a target="_blank" href='/config/file/template'>去设置</a>)</span>)}>
+        <TemplateFileParameter parameters={parameters}/>
+      </Card>
       <Form.Item
         label="应用发布前执行"
         tooltip="在发布的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。"

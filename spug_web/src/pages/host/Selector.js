@@ -5,12 +5,14 @@
  */
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Row, Col, Tree, Table, Button, Space, Input, Alert } from 'antd';
+import { Modal, Row, Col, Tree, Table, Button, Space, Input, Alert, Tag } from 'antd';
 import { FolderOpenOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons';
 import IPAddress from './IPAddress';
 import hStore from './store';
 import store from './store2';
 import styles from './selector.module.less';
+import lds from 'lodash';
+import hostStore from 'pages/host/store';
 
 function HostSelector(props) {
   const [visible, setVisible] = useState(false)
@@ -42,7 +44,7 @@ function HostSelector(props) {
   }, [store.treeData])
 
   useEffect(() => {
-    setSelectedRowKeys([...props.value])
+    setSelectedRowKeys(Array.isArray(props.value) ? [...props.value] : [props.value])
   }, [props.value])
 
   useEffect(() => {
@@ -133,7 +135,12 @@ function HostSelector(props) {
               </Button>
             )) : (
             <div style={{display: 'flex', alignItems: 'center'}}>
-              {props.value.length > 0 && <span style={{marginRight: 16}}>已选择 {props.value.length} 台</span>}
+              {(Array.isArray(props.value) && props.value.length > 0) && <span style={{marginRight: 16}}>已选择 {props.value.length} 台</span>}
+              {(!Array.isArray(props.value) && props.value !== null && props.value !== undefined) && <span style={{marginRight: 16}}>
+                <Tag color="#2db7f5" key={props.value} style={{ marginRight: 8 }}>
+                  {lds.get(hostStore.idMap, `${props.value}.name`)}[{lds.get(hostStore.idMap, `${props.value}.hostname`)}]
+                </Tag>
+                </span>}
               <Button type="link" style={{padding: 0}} onClick={() => setVisible(true)}>选择主机</Button>
             </div>
           )

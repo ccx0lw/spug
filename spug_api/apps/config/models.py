@@ -148,3 +148,25 @@ class FileTemplate(models.Model, ModelMixin):
         constraints = [
             UniqueConstraint(fields=['env_id', 'type'], name='unique_env_id_type')
         ]
+        
+# 容器仓库地址,每个环境一个
+class ContainerRepository(models.Model, ModelMixin):
+    env_id = models.IntegerField(unique=True)
+    repository = models.CharField(max_length=255)
+    repository_name_prefix = models.CharField(max_length=255, null=True)
+    desc = models.CharField(max_length=255, null=True)
+    created_at = models.CharField(max_length=20, default=human_datetime)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT)
+    updated_at = models.CharField(max_length=20, null=True)
+    updated_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
+
+    def to_dict(self, *args, **kwargs):
+        tmp = super().to_dict(*args, **kwargs)
+        return tmp
+
+    def __repr__(self):
+        return f'<App {self.name!r}>'
+
+    class Meta:
+        db_table = 'container_repository'
+        ordering = ('-id',)

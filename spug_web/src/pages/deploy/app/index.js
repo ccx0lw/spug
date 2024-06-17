@@ -21,12 +21,8 @@ import tagStore from 'pages/config/tag/store';
 export default observer(function () {
   useEffect(() => {
     store.fetchRecords();
-    if (envStore.records.length === 0) {
-      envStore.fetchRecords()
-    }
-    if (tagStore.records.length === 0) {
-      tagStore.fetchRecords()
-    }
+    envStore.fetchRecords();
+    tagStore.fetchRecords();
   }, [])
 
   const tags = tagStore.records || []

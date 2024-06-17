@@ -168,6 +168,15 @@ export default [{
       {key: 'edit', label: '编辑模板文件'},
       {key: 'del', label: '删除模板文件'},
     ]
+  }, {
+    key: 'container.repository',
+    label: '容器仓库管理',
+    perms: [
+      {key: 'view', label: '查看'},
+      {key: 'add', label: '新建'},
+      {key: 'edit', label: '编辑'},
+      {key: 'del', label: '删除'},
+    ]
   }]
 }, {
   key: 'monitor',

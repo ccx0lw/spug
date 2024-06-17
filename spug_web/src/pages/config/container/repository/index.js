@@ -5,8 +5,7 @@
  */
 import React, {useEffect} from 'react';
 import { observer } from 'mobx-react';
-import { Select } from 'antd';
-import { SearchForm, AuthDiv, Breadcrumb } from 'components';
+import { AuthDiv, Breadcrumb } from 'components';
 import ComTable from './Table';
 import ComForm from './Form';
 import store from './store';
@@ -15,29 +14,18 @@ import envStore from 'pages/config/environment/store';
 export default observer(function () {
 
   useEffect(() => {
-    if (envStore.records.length === 0) {
-      envStore.fetchRecords()
-    }
+    envStore.fetchRecords()
   }, [])
 
   return (
-    <AuthDiv auth="config.template.file.view">
+    <AuthDiv auth="config.container.repository.view">
       <Breadcrumb>
         <Breadcrumb.Item>首页</Breadcrumb.Item>
         <Breadcrumb.Item>配置中心</Breadcrumb.Item>
-        <Breadcrumb.Item>模版文件</Breadcrumb.Item>
+        <Breadcrumb.Item>容器仓库</Breadcrumb.Item>
       </Breadcrumb>
-      <SearchForm>
-        <SearchForm.Item span={8} title="模板类型">
-          <Select allowClear value={store.f_type} onChange={v => store.f_type = v} placeholder="请选择">
-            {store.FileTypes.map(item => (
-              <Select.Option value={item.value} key={item.key}>{item.key}</Select.Option>
-            ))}
-          </Select>
-        </SearchForm.Item>
-      </SearchForm>
       <ComTable/>
       {store.formVisible && <ComForm/>}
     </AuthDiv>
-  );
+  )
 })

@@ -423,7 +423,9 @@ class FileTemplateView(View):
     @auth('file.template.view')
     def get(self, request):
         form, error = JsonParser(
-            Argument('id', type=int, required=False)
+            Argument('id', type=int, required=False),
+            Argument('env_id', type=int, required=False),
+            Argument('type', filter=lambda x: x in dict(FileTemplate.TYPES), help='请选择模版类型', required=False)
         ).parse(request.GET)
         if error is None:
             templates = FileTemplate.objects.all()
@@ -431,6 +433,14 @@ class FileTemplateView(View):
                 template = templates.filter(pk=form.id).first()
                 if template:
                     return json_response(template.to_view())
+                else:
+                    return json_response()
+            elif form.env_id is not None and form.type is not None:
+                template = templates.filter(env_id=form.env_id, type=form.type).first()
+                if template:
+                    return json_response(template.to_view())
+                else:
+                    return json_response()
             else:
                 templates = [t.to_view() for t in templates]
         return json_response(templates)
@@ -439,7 +449,7 @@ class FileTemplateView(View):
     def post(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
-            Argument('type', help='请选择模版类型'),
+            Argument('type', filter=lambda x: x in dict(FileTemplate.TYPES), help='请选择模版类型'),
             Argument('env_id', help='请选择环境'),
             Argument('body', help='请输入模版内容'),
             Argument('parameters', type=list, handler=json.dumps, default=[]),
@@ -463,4 +473,48 @@ class FileTemplateView(View):
         ).parse(request.GET)
         if error is None:
             FileTemplate.objects.filter(pk=form.id).delete()
+        return json_response(error=error)
+    
+class ContainerRepositoryView(View):
+    @auth('container.repository.view')
+    def get(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, required=False)
+        ).parse(request.GET)
+        if error is None:
+            repositorys = ContainerRepository.objects.all()
+            if form.id:
+                repository = repositorys.filter(pk=form.id).first()
+                return json_response(repository)
+        return json_response(repositorys)
+
+    @auth('container.repository.add|container.repository.edit')
+    def post(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, required=False),
+            Argument('env_id', help='请选择环境'),
+            Argument('repository', help='请输入仓库地址'),
+            Argument('repository_name_prefix', required=False, help='请输入镜像前缀'),
+            Argument('desc', required=False)
+        ).parse(request.body)
+        if error is None:
+            if form.repository_name_prefix:
+                # 去掉前后/
+                form.repository_name_prefix = form.repository_name_prefix.strip('/')
+            if form.id:
+                form.updated_at = human_datetime()
+                form.updated_by = request.user
+                ContainerRepository.objects.filter(pk=form.pop('id')).update(**form)
+            else:
+                form.created_by = request.user
+                ContainerRepository.objects.create(**form)
+        return json_response(error=error)
+
+    @auth('container.repository.del')
+    def delete(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, help='请指定操作对象')
+        ).parse(request.GET)
+        if error is None:
+            ContainerRepository.objects.filter(pk=form.id).delete()
         return json_response(error=error)

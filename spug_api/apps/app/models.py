@@ -133,6 +133,8 @@ class DeployExtend2(models.Model, ModelMixin):
 class DeployExtend3(models.Model, ModelMixin):
     deploy = models.OneToOneField(Deploy, primary_key=True, on_delete=models.CASCADE)
     git_repo = models.CharField(max_length=255)
+    # 容器镜像
+    image_repo = models.CharField(max_length=255, null=True)
     dst_dir = models.CharField(max_length=255)
     dst_repo = models.CharField(max_length=255)
     versions = models.IntegerField()
@@ -143,6 +145,9 @@ class DeployExtend3(models.Model, ModelMixin):
     hook_post_image = models.TextField(null=True)
     hook_pre_host = models.TextField(null=True)
     hook_post_host = models.TextField(null=True)
+    image_name = models.CharField(max_length=255, null=True)
+    image_version = models.CharField(max_length=255, null=True)
+    build_image_host_id = models.TextField(null=True)
 
     def to_dict(self, *args, **kwargs):
         tmp = super().to_dict(*args, **kwargs)

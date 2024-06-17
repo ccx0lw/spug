@@ -195,13 +195,23 @@ class DeployView(View):
                     Argument('filter_rule', type=dict, help='参数错误'),
                     Argument('hook_pre_server', handler=str.strip, default=''),
                     Argument('hook_post_server', handler=str.strip, default=''),
+                    Argument('hook_pre_image', handler=str.strip, default=''),
+                    Argument('hook_post_image', handler=str.strip, default=''),
                     Argument('hook_pre_host', handler=str.strip, default=''),
-                    Argument('hook_post_host', handler=str.strip, default='')
+                    Argument('hook_post_host', handler=str.strip, default=''),
+                    Argument('image_name', handler=str.strip, default=''),
+                    Argument('image_version', handler=str.strip, default=''),
+                    Argument('build_image_host_id', handler=str.strip, default='')
                 ).parse(request.body)
                 if error:
                     return json_response(error=error)
                 extend_form.dst_dir = extend_form.dst_dir.rstrip('/')
                 extend_form.filter_rule = json.dumps(extend_form.filter_rule)
+                
+                # TODO 检查对应环境是否维护了Dockerfile
+                
+                # TODO 检查对应环境是否维护了K8S yaml
+                
                 if form.id:
                     extend = DeployExtend3.objects.filter(deploy_id=form.id).first()
                     if extend.git_repo != extend_form.git_repo:

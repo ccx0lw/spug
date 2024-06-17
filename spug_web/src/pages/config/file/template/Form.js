@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Modal, Form, Input, Select, Button, Radio, Table, Tooltip, message } from 'antd';
+import { Modal, Form, Input, Select, Button, Table, Tooltip, message } from 'antd';
 import { ACEditor } from 'components';
 import Parameter from './Parameter';
 import { http, cleanCommand } from 'libs';

@@ -3,43 +3,66 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React, { useState } from 'react';
+import React, {useState, useEffect} from 'react';
 import { observer } from 'mobx-react';
-import { Form, Button, Input, Row, Col, message } from 'antd';
+import { Form, Button, Row, Col, Input, Card, Select } from 'antd';
 import { ACEditor } from 'components';
 import { http, cleanCommand } from 'libs';
 import Tips from './Tips';
 import store from './store';
+import HostSelector from 'pages/host/Selector';
+import TemplateFileParameter from './TemplateFileParameter.js'
 
 export default observer(function () {
+  const [loading, setLoading] = useState(false);
+  const [template, setTemplate] = useState({})
+  const [parameters, setParameters] = useState([])
+
+  const info = store.deploy;
+
+  useEffect(() => {
+    setLoading(true);
+    http.get('/api/config/file/template/?env_id='+info.env_id+'&type=dockerfile')
+      .then(res => {
+        setTemplate(res)
+        setParameters(res.parameters || [])
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
   function handleNext() {
     store.page += 1
   }
 
-  const info = store.deploy;
   return (
     <Form layout="vertical" style={{padding: '0 120px'}}>
-      <Form.Item required label="部署路径" tooltip="应用最终在主机上的部署路径，为了数据安全请确保该目录不存在，Spug 将会自动创建并接管该目录，可使用全局变量，例如：/www/$SPUG_APP_KEY">
-        <Input value={info['dst_dir']} onChange={e => info['dst_dir'] = e.target.value} placeholder="请输入部署目标路径"/>
-      </Form.Item>
-      <Button>Dockerfile</Button>
       <Row gutter={24}>
         <Col span={14}>
-          <Form.Item required label="存储路径" tooltip="此目录用于存储应用的历史版本，可使用全局变量，例如：/data/repos/$SPUG_APP_KEY">
-            <Input value={info['dst_repo']} onChange={e => info['dst_repo'] = e.target.value} placeholder="请输入部署目标路径"/>
+          <Form.Item required label="镜像名称" tooltip="镜像名称">
+            <Input value={info['image_name']} onChange={e => info['image_name'] = e.target.value} placeholder="请输入镜像名称"/>
           </Form.Item>
         </Col>
         <Col span={10}>
-          <Form.Item required label="版本数量" tooltip="早于指定数量的构建纪录及历史版本会被删除，以释放磁盘空间。">
-            <Input value={info['versions']} onChange={e => info['versions'] = e.target.value} placeholder="请输入保存的版本数量"/>
-          </Form.Item>
-        </Col>
-        <Col span={10}>
-          <Form.Item required label="镜像名称" tooltip="">
-            <Input />
+          <Form.Item required label="镜像版本" tooltip="镜像版本，支持变量配置 eg: $SPUG_GIT_TAG">
+            <Input defaultValue={"$SPUG_GIT_TAG"} value={info['image_version']} onChange={e => info['image_version'] = e.target.value} placeholder="请输入镜像版本"/>
           </Form.Item>
         </Col>
       </Row>
+      <Row gutter={24}>
+        <Col span={14}>
+          <Form.Item required label="编译机器" tooltip="该发布配置作用于哪些目标主机。（执行K8S/Docker命令的机器）">
+            <HostSelector onlyOne={true} value={info['build_image_host_id']} onChange={id => info['build_image_host_id'] = id}/>
+          </Form.Item>
+        </Col>
+        <Col span={10}>
+          <Form.Item label="Dockerfile" tooltip="自动读取配置中心-模板文件（根据对应的环境自动读取）">
+            {template.id > 0 ? (<span>存在模板文件(<a target="_blank" href='/config/file/template'>查看</a>)</span>) : (<span>不存在模板文件(<a target="_blank" href='/config/file/template'>去设置</a>)</span>)}
+          </Form.Item>
+        </Col>
+      </Row>
+      <Card size="small" title={"Dockerfile 动态参数"}>
+        <TemplateFileParameter parameters={parameters}/>
+      </Card>
       <Form.Item
         label="编译镜像前执行"
         tooltip="在发布的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。（eg: 编译本地镜像）"
