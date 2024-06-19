@@ -50,10 +50,10 @@ export default observer(function () {
         setTemplate(res)
         setParameters(res.parameters || [])
         // 去掉不在parameters中的
-        const parameterNames = new Set(res.parameters.map(param => param.variable))
-        store.deploy.dockerfile_params = store.deploy.dockerfile_params.filter(param => {
+        const parameterNames = new Set(res.parameters?.map(param => param.variable))
+        store.deploy.dockerfile_params = store.deploy.dockerfile_params?.filter(param => {
           return Object.keys(param).some(key => parameterNames.has(key))
-        })
+        }) || []
       })
       .finally(() => setLoading(false))
     initDefaultValue()

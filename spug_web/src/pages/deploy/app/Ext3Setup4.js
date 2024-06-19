@@ -49,10 +49,10 @@ export default observer(function () {
       .then(res => {
         setTemplate(res)
         setParameters(res.parameters || [])
-        const parameterNames = new Set(res.parameters.map(param => param.variable))
-        store.deploy.yaml_params = store.deploy.yaml_params.filter(param => {
+        const parameterNames = new Set(res.parameters?.map(param => param.variable))
+        store.deploy.yaml_params = store.deploy.yaml_params?.filter(param => {
           return Object.keys(param).some(key => parameterNames.has(key))
-        })
+        }) || []
       })
       .finally(() => setLoading(false))
   }, [store.deploy.env_id])
