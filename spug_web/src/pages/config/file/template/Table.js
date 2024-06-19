@@ -5,13 +5,11 @@
  */
 import React from 'react';
 import { observer } from 'mobx-react';
-import { Table, Modal, message } from 'antd';
+import { Table, Modal, message, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { http, hasPermission } from 'libs';
 import { Action, TableCard, AuthButton } from "components";
 import store from './store';
-import envStore from 'pages/config/environment/store';
-import lds from 'lodash';
 
 @observer
 class ComTable extends React.Component {
@@ -56,9 +54,10 @@ class ComTable extends React.Component {
           pageSizeOptions: ['10', '20', '50', '100']
         }}>
         <Table.Column title="环境" render={info => (
-          <span>
-            {lds.get(envStore.idMap, `${info.env_id}.name`)}
-          </span>
+          <div>
+            {info.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+            {info.env_name}
+          </div>
         )}/>
         <Table.Column title="模版名称" dataIndex="name"/>
         <Table.Column title="模版类型" dataIndex="type"/>

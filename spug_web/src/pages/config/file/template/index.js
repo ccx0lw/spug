@@ -3,23 +3,15 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React, {useEffect} from 'react';
+import React from 'react';
 import { observer } from 'mobx-react';
 import { Select } from 'antd';
 import { SearchForm, AuthDiv, Breadcrumb } from 'components';
 import ComTable from './Table';
 import ComForm from './Form';
 import store from './store';
-import envStore from 'pages/config/environment/store';
 
 export default observer(function () {
-
-  useEffect(() => {
-    if (envStore.records.length === 0) {
-      envStore.fetchRecords()
-    }
-  }, [])
-
   return (
     <AuthDiv auth="config.template.file.view">
       <Breadcrumb>

@@ -100,6 +100,14 @@ class Store {
   delHost = (index) => {
     this.deploy['host_ids'].splice(index, 1)
   }
+
+  updateDeployDockerfileParmas = (dockerfile_params) => {
+    this.deploy = { ...this.deploy, dockerfile_params };
+  }
+
+  updateDeployYamlParmas = (yaml_params) => {
+    this.deploy = { ...this.deploy, yaml_params };
+  }
 }
 
 export default new Store()

@@ -8,7 +8,7 @@ import { observer } from 'mobx-react';
 import { Table, Modal, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { Action, TableCard, AuthButton } from 'components';
-import { http, hasPermission, history } from 'libs';
+import { http, hasPermission } from 'libs';
 import store from './store';
 
 @observer

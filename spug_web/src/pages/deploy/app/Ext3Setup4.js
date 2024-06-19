@@ -3,7 +3,7 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useReducer} from 'react';
 import { observer } from 'mobx-react';
 import { Form, Button, message, Card } from 'antd';
 import { ACEditor } from 'components';
@@ -13,21 +13,53 @@ import store from './store';
 import TemplateFileParameter from './TemplateFileParameter.js'
 
 export default observer(function () {
-  const [loading, setLoading] = useState(false);
+  const reducerState = (state, action) => {
+    switch (action.type) {
+      case 'UPDATE_YAML_PARAMS':
+        const index = state.yaml_params.findIndex(param => param.hasOwnProperty(action.variable));
+        let newYamlParams = [...state.yaml_params];
+        
+        if (index !== -1) {
+          newYamlParams[index] = {...newYamlParams[index], [action.variable]: action.value};
+        } else {
+          newYamlParams = [...newYamlParams, {[action.variable]: action.value}];
+        }
+        
+        return {
+          ...state,
+          yaml_params: newYamlParams
+        };
+      default:
+        return state;
+    }
+  };
+
+
+  const [loading, setLoading] = useState(false)
   const [template, setTemplate] = useState({})
   const [parameters, setParameters] = useState([])
+  const [state, dispatch] = useReducer(reducerState, { yaml_params: store.deploy.yaml_params })
 
-  const info = store.deploy;
+  const info = store.deploy
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
-    http.get('/api/config/file/template/?env_id='+info.env_id+'&type=yaml')
+    http.get('/api/config/file/template/?env_id='+store.deploy.env_id+'&type=yaml')
       .then(res => {
         setTemplate(res)
         setParameters(res.parameters || [])
+        const parameterNames = new Set(res.parameters.map(param => param.variable))
+        store.deploy.yaml_params = store.deploy.yaml_params.filter(param => {
+          return Object.keys(param).some(key => parameterNames.has(key))
+        })
       })
       .finally(() => setLoading(false))
-  }, [])
+  }, [store.deploy.env_id])
+
+  useEffect(() => {
+    store.updateDeployYamlParmas(state.yaml_params);
+  }, [state.yaml_params]);
 
   function handleSubmit() {
     const {dst_dir, dst_repo} = store.deploy;
@@ -37,7 +69,6 @@ export default observer(function () {
       return message.error('存储路径不能位于部署路径内')
     }
     setLoading(true);
-    const info = store.deploy;
     info['app_id'] = store.app_id;
     info['extend'] = '3';
     http.post('/api/app/deploy/', info)
@@ -48,10 +79,18 @@ export default observer(function () {
       }, () => setLoading(false))
   }
 
+  // 更新 `info['yaml_params']` 的函数
+  const updateYamlParams = (variable, value) => {
+    dispatch({ type: 'UPDATE_YAML_PARAMS', variable, value });
+  };
+
   return (
     <Form layout="vertical" style={{padding: '0 120px'}}>
-      <Card size="small" title={template.id > 0 ? (<span>发布模板yaml参数配置(<a target="_blank" href='/config/file/template'>查看</a>)</span>) : (<span>当前环境不存在yaml模板文件(<a target="_blank" href='/config/file/template'>去设置</a>)</span>)}>
-        <TemplateFileParameter parameters={parameters}/>
+      <Card size="small" title={template.id > 0 ? (<span style={{color:"#11D16D"}}>发布模板yaml参数配置(<a target="_blank" href='/config/file/template'>查看</a>)</span>) : (<span style={{color:"#f00"}}>当前环境不存在yaml模板文件(<a target="_blank" href='/config/file/template'>去设置</a>)</span>)}>
+        <TemplateFileParameter 
+          parameters={parameters}
+          param_values={info['yaml_params']}
+          onUpdate={updateYamlParams}/>
       </Card>
       <Form.Item
         label="应用发布前执行"

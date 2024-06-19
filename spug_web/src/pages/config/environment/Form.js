@@ -5,10 +5,9 @@
  */
 import React, { useState } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Form, Input, message, Select, Switch } from 'antd';
+import { Modal, Form, Input, message, Switch } from 'antd';
 import http from 'libs/http';
 import store from './store';
-const { Option } = Select;
 
 export default observer(function () {
   const [form] = Form.useForm();

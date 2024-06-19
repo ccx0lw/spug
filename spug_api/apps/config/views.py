@@ -428,7 +428,7 @@ class FileTemplateView(View):
             Argument('type', filter=lambda x: x in dict(FileTemplate.TYPES), help='请选择模版类型', required=False)
         ).parse(request.GET)
         if error is None:
-            templates = FileTemplate.objects.all()
+            templates = FileTemplate.objects.annotate(env_name=F('env__name'), env_prod=F('env__prod')).all()
             if form.id:
                 template = templates.filter(pk=form.id).first()
                 if template:
@@ -482,7 +482,7 @@ class ContainerRepositoryView(View):
             Argument('id', type=int, required=False)
         ).parse(request.GET)
         if error is None:
-            repositorys = ContainerRepository.objects.all()
+            repositorys = ContainerRepository.objects.annotate(env_name=F('env__name'), env_prod=F('env__prod')).all()
             if form.id:
                 repository = repositorys.filter(pk=form.id).first()
                 return json_response(repository)

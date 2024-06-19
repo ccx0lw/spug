@@ -192,7 +192,7 @@ class DeployView(View):
                     Argument('dst_dir', handler=str.strip, help='请输入发布部署路径'),
                     Argument('dst_repo', handler=str.strip, help='请输入发布存储路径'),
                     Argument('versions', type=int, filter=lambda x: x > 0, help='请输入发布保留版本数量'),
-                    Argument('filter_rule', type=dict, help='参数错误'),
+                    Argument('filter_rule', type=dict, help='filter_rule 参数错误'),
                     Argument('hook_pre_server', handler=str.strip, default=''),
                     Argument('hook_post_server', handler=str.strip, default=''),
                     Argument('hook_pre_image', handler=str.strip, default=''),
@@ -201,13 +201,16 @@ class DeployView(View):
                     Argument('hook_post_host', handler=str.strip, default=''),
                     Argument('image_name', handler=str.strip, default=''),
                     Argument('image_version', handler=str.strip, default=''),
-                    Argument('build_image_host_id', handler=str.strip, default='')
+                    Argument('build_image_host_id', handler=str.strip, default=''),
+                    Argument('dockerfile_params', type=list, help='dockerfile_params参数错误'),
+                    Argument('yaml_params', type=list, help='yaml_params参数错误')
                 ).parse(request.body)
                 if error:
                     return json_response(error=error)
                 extend_form.dst_dir = extend_form.dst_dir.rstrip('/')
                 extend_form.filter_rule = json.dumps(extend_form.filter_rule)
-                
+                extend_form.dockerfile_params = json.dumps(extend_form.dockerfile_params)
+                extend_form.yaml_params = json.dumps(extend_form.yaml_params)
                 # TODO 检查对应环境是否维护了Dockerfile
                 
                 # TODO 检查对应环境是否维护了K8S yaml

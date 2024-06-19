@@ -113,8 +113,8 @@ class FileTemplate(models.Model, ModelMixin):
         ('yaml', 'k8s.yaml')
     )
     name = models.CharField(max_length=50)
-    env_id = models.IntegerField()
-    type = models.CharField(max_length=5, choices=TYPES)
+    env = models.ForeignKey(Environment, on_delete=models.PROTECT)
+    type = models.CharField(max_length=50, choices=TYPES)
     body = models.TextField()
     parameters = models.TextField(default='[]')
     desc = models.CharField(max_length=255, null=True)
@@ -124,11 +124,13 @@ class FileTemplate(models.Model, ModelMixin):
     updated_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
     
     def __repr__(self):
-        return f'<FileTemplate {self.name!r}>'
+        return '<FileTemplate env_id=%r>' % (self.env_id)
     
     def to_view(self):
         tmp = self.to_dict()
         tmp['parameters'] = json.loads(self.parameters)
+        tmp['env_name'] = self.env_name if hasattr(self, 'env_name') else None
+        tmp['env_prod'] = self.env_prod if hasattr(self, 'env_prod') else None
         return tmp
     
     @classmethod
@@ -151,7 +153,7 @@ class FileTemplate(models.Model, ModelMixin):
         
 # 容器仓库地址,每个环境一个
 class ContainerRepository(models.Model, ModelMixin):
-    env_id = models.IntegerField(unique=True)
+    env = models.ForeignKey(Environment, on_delete=models.PROTECT)
     repository = models.CharField(max_length=255)
     repository_name_prefix = models.CharField(max_length=255, null=True)
     desc = models.CharField(max_length=255, null=True)
@@ -162,10 +164,12 @@ class ContainerRepository(models.Model, ModelMixin):
 
     def to_dict(self, *args, **kwargs):
         tmp = super().to_dict(*args, **kwargs)
+        tmp['env_name'] = self.env_name if hasattr(self, 'env_name') else None
+        tmp['env_prod'] = self.env_prod if hasattr(self, 'env_prod') else None
         return tmp
 
     def __repr__(self):
-        return f'<App {self.name!r}>'
+        return '<ContainerRepository env_id=%r>' % (self.env_id)
 
     class Meta:
         db_table = 'container_repository'

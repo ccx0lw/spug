@@ -74,9 +74,9 @@ export default observer(function () {
       onCancel={() => S.formVisible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
-      <Form form={form} initialValues={info} labelCol={{span: 6}} wrapperCol={{span: 14}}>
+      <Form form={form} initialValues={info} layout="vertical" style={{padding: '0 20px'}}>
         <Form.Item required label="模板类型" style={{marginBottom: 0}}>
-          <Form.Item name="type" style={{display: 'inline-block', width: 'calc(75%)', marginRight: 8}}>
+          <Form.Item name="type" style={{display: 'inline-block', width: 'calc(45%)', marginRight: 8}}>
             <Select placeholder="请选择模板类型" onChange={value => updateEnvs(value)}>
               {S.FileTypes.map(item => (
                 <Select.Option value={item.value} key={item.key}>{item.key}</Select.Option>
@@ -85,7 +85,7 @@ export default observer(function () {
           </Form.Item>
         </Form.Item>
         <Form.Item required label="环境" style={{marginBottom: 0}}>
-          <Form.Item required name="env_id" style={{display: 'inline-block', width: 'calc(75%)', marginRight: 8}}>
+          <Form.Item required name="env_id" style={{display: 'inline-block', width: 'calc(45%)', marginRight: 8}}>
             <Select
               placeholder="请选择环境">
               {envStore.records.map(item => (
@@ -94,9 +94,10 @@ export default observer(function () {
             </Select>
           </Form.Item>
         </Form.Item>
-        <Form.Item required label="模板内容" shouldUpdate={(p, c) => p.interpreter !== c.interpreter}>
+        <Form.Item required label="模板内容" shouldUpdate={(p, c) => p.interpreter !== c.interpreter} style={{display: 'inline-block', width: 'calc(100%)', marginRight: 8}}>
           {({getFieldValue}) => (
             <ACEditor
+              style={{display: 'inline-block', width: 'calc(100%)', marginRight: 8}}
               mode={getFieldValue('type')}
               value={body}
               onChange={val => setBody(val)}

@@ -13,7 +13,6 @@ import S from './index.module.less';
 import store from './store';
 import moment from 'moment';
 import tagStore from 'pages/config/tag/store';
-import { render } from 'less';
 
 function DeployConfirm() {
   return (

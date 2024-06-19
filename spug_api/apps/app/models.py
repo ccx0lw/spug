@@ -147,11 +147,17 @@ class DeployExtend3(models.Model, ModelMixin):
     hook_post_host = models.TextField(null=True)
     image_name = models.CharField(max_length=255, null=True)
     image_version = models.CharField(max_length=255, null=True)
-    build_image_host_id = models.TextField(null=True)
+    build_image_host_id = models.IntegerField()
+    # dockerfile文件指定的参数
+    dockerfile_params = models.TextField(null=True)
+    # yaml配置指定的参数
+    yaml_params = models.TextField(null=True)
 
     def to_dict(self, *args, **kwargs):
         tmp = super().to_dict(*args, **kwargs)
         tmp['filter_rule'] = json.loads(self.filter_rule)
+        tmp['dockerfile_params'] = json.loads(self.dockerfile_params)
+        tmp['yaml_params'] = json.loads(self.yaml_params)
         return tmp
 
     def __repr__(self):
