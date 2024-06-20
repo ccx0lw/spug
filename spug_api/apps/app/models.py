@@ -133,8 +133,6 @@ class DeployExtend2(models.Model, ModelMixin):
 class DeployExtend3(models.Model, ModelMixin):
     deploy = models.OneToOneField(Deploy, primary_key=True, on_delete=models.CASCADE)
     git_repo = models.CharField(max_length=255)
-    # 容器镜像
-    image_repo = models.CharField(max_length=255, null=True)
     dst_dir = models.CharField(max_length=255)
     dst_repo = models.CharField(max_length=255)
     versions = models.IntegerField()

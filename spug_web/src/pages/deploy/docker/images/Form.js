@@ -92,7 +92,7 @@ export default observer(function () {
     const formData = form.getFieldsValue();
     formData['deploy_id'] = store.deploy.id;
     formData['extra'] = [git_type, extra1, extra2];
-    http.post('/api/docker_images/', formData)
+    http.post('/api/docker_image/', formData)
       .then(res => {
         message.success('操作成功');
         store.formVisible = false;

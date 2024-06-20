@@ -6,8 +6,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { observer } from 'mobx-react';
-import { Modal, Menu, Spin, Input, Select } from 'antd';
-import { OrderedListOutlined, BuildOutlined, SearchOutlined } from '@ant-design/icons';
+import { Modal, Menu, Spin, Input, Select, Tooltip } from 'antd';
+import { OrderedListOutlined, BuildOutlined, SearchOutlined, ContainerOutlined } from '@ant-design/icons';
 import { includes, http } from 'libs';
 import styles from './index.module.less';
 import envStore from 'pages/config/environment/store';
@@ -99,7 +99,7 @@ export default observer(function AppSelector(props) {
             <div style={{height: 540, overflow: 'auto'}}>
               {records.map(item => (
                 <div key={item.id} className={styles.appItem} onClick={() => props.onSelect(item)}>
-                  {item.extend === '1' ? <OrderedListOutlined/> : <BuildOutlined/>}
+                  {item.extend === '1' ? <Tooltip title="常规发布"><OrderedListOutlined/></Tooltip> : (item.extend === '3' ? <Tooltip title="容器发布"><ContainerOutlined/></Tooltip> : <Tooltip title="自定义发布"><BuildOutlined/></Tooltip>)}
                   <div className={styles.body}>{item.app_name}</div>
                   <div style={{color: '#999'}}>{item.app_key}</div>
                 </div>

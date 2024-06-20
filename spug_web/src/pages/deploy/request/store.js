@@ -17,6 +17,7 @@ class Store {
   @observable addVisible = false;
   @observable ext1Visible = false;
   @observable ext2Visible = false;
+  @observable ext3Visible = false;
   @observable batchVisible = false;
   @observable approveVisible = false;
   @observable rollbackVisible = false;
@@ -103,6 +104,8 @@ class Store {
     this.record = {deploy_id: id, app_host_ids: host_ids, require_upload};
     if (deploy.extend === '1') {
       this.ext1Visible = true
+    } else if (deploy.extend === '3') {
+      this.ext3Visible = true
     } else {
       this.ext2Visible = true
     }
@@ -121,6 +124,8 @@ class Store {
     if (info.plan) this.record.plan = moment(info.plan);
     if (info['app_extend'] === '1') {
       this.ext1Visible = true
+    } else if (info['app_extend'] === '3') {
+      this.ext3Visible = true
     } else {
       this.ext2Visible = true
     }

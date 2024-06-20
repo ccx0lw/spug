@@ -24,7 +24,7 @@ export default observer(function Console() {
   useEffect(() => {
     let socket;
     initialTerm()
-    http.get(`/api/docker_images/${store.record.id}/`)
+    http.get(`/api/docker_image/${store.record.id}/`)
       .then(res => {
         term.write(res.data)
         setStep(res.step)

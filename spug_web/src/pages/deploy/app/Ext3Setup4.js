@@ -16,7 +16,7 @@ export default observer(function () {
   const reducerState = (state, action) => {
     switch (action.type) {
       case 'UPDATE_YAML_PARAMS':
-        const index = state.yaml_params.findIndex(param => param.hasOwnProperty(action.variable));
+        const index = state.yaml_params?.findIndex(param => param.hasOwnProperty(action.variable));
         let newYamlParams = [...state.yaml_params];
         
         if (index !== -1) {
@@ -38,7 +38,7 @@ export default observer(function () {
   const [loading, setLoading] = useState(false)
   const [template, setTemplate] = useState({})
   const [parameters, setParameters] = useState([])
-  const [state, dispatch] = useReducer(reducerState, { yaml_params: store.deploy.yaml_params })
+  const [state, dispatch] = useReducer(reducerState, { yaml_params: store.deploy.yaml_params||[] })
 
   const info = store.deploy
 

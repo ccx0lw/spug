@@ -498,6 +498,7 @@ class ContainerRepositoryView(View):
             Argument('desc', required=False)
         ).parse(request.body)
         if error is None:
+            form.repository = form.repository.strip('/')
             if form.repository_name_prefix:
                 # 去掉前后/
                 form.repository_name_prefix = form.repository_name_prefix.strip('/')

@@ -83,7 +83,7 @@ export default [{
       {key: 'del', label: '删除版本'},
     ]
   }, {
-    key: 'docker_images',
+    key: 'docker_image',
     label: '容器镜像',
     perms: [
       {key: 'view', label: '查看构建'},

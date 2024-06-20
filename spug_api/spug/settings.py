@@ -46,7 +46,7 @@ INSTALLED_APPS = [
     'apps.deploy',
     'apps.notify',
     'apps.repository',
-    'apps.docker_images',
+    'apps.docker_image',
     'apps.home',
     'channels',
 ]

@@ -30,7 +30,7 @@ class Store {
 
   fetchRecords = () => {
     this.isFetching = true;
-    return http.get('/api/docker_images/')
+    return http.get('/api/docker_image/')
       .then(res => this.records = res)
       .finally(() => this.isFetching = false)
   };

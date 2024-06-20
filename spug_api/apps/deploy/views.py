@@ -12,6 +12,7 @@ from apps.app.models import Deploy, DeployExtend2
 from apps.repository.models import Repository
 from apps.deploy.utils import dispatch, Helper
 from apps.host.models import Host
+from apps.docker_image.models import DockerImage
 from collections import defaultdict
 from threading import Thread
 from datetime import datetime
@@ -112,13 +113,18 @@ class RequestDetailView(View):
         outputs = {x.id: {'id': x.id, 'title': x.name, 'data': f'{human_time()} 读取数据...        '} for x in hosts}
         response = {'outputs': outputs, 'status': req.status}
         if req.is_quick_deploy:
-            outputs['local'] = {'id': 'local', 'data': ''}
+            outputs['local'] = {'id': 'local', 'data': '', 'title': '代码构建'}
+            if req.deploy.extend == '3':
+                outputs['image'] = {'id': 'image', 'data': '', 'title': '镜像编译'}
         if req.deploy.extend == '2':
             outputs['local'] = {'id': 'local', 'data': f'{human_time()} 读取数据...        '}
             response['s_actions'] = json.loads(req.deploy.extend_obj.server_actions)
             response['h_actions'] = json.loads(req.deploy.extend_obj.host_actions)
             if not response['h_actions']:
                 response['outputs'] = {'local': outputs['local']}
+        if req.deploy.extend == '3':
+            outputs['local'] = {'id': 'local', 'data': '', 'title': '代码构建'}
+            outputs['image'] = {'id': 'image', 'data': '', 'title': '镜像编译'}
         rds, key, counter = get_redis_connection(), f'{settings.REQUEST_KEY}:{r_id}', 0
         data = rds.lrange(key, counter, counter + 9)
         while data:
@@ -170,9 +176,9 @@ class RequestDetailView(View):
         Thread(target=dispatch, args=(req, form.mode == 'fail')).start()
         if req.is_quick_deploy:
             if req.repository_id:
-                outputs['local'] = {'id': 'local', 'step': 100, 'data': f'{human_time()} 已构建完成忽略执行。'}
+                outputs['local'] = {'id': 'local', 'step': 100, 'data': f'{human_time()} 已构建完成忽略执行。', 'title': '代码构建'}
             else:
-                outputs['local'] = {'id': 'local', 'step': 0, 'data': f'{human_time()} 建立连接...        '}
+                outputs['local'] = {'id': 'local', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': '代码构建'}
         if req.deploy.extend == '2':
             outputs['local'] = {'id': 'local', 'step': 0, 'data': f'{human_time()} 建立连接...        '}
             s_actions = json.loads(req.deploy.extend_obj.server_actions)
@@ -183,6 +189,15 @@ class RequestDetailView(View):
             if not h_actions:
                 outputs = {'local': outputs['local']}
             return json_response({'s_actions': s_actions, 'h_actions': h_actions, 'outputs': outputs})
+        if req.deploy.extend == '3':
+            if req.repository_id:
+                outputs['local'] = {'id': 'local', 'step': 100, 'data': f'{human_time()} 已构建完成忽略执行。', 'title': '代码构建'}
+            else:
+                outputs['local'] = {'id': 'local', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': '代码构建'}
+            if req.docker_image_id:
+                outputs['image'] = {'id': 'image', 'step': 100, 'data': f'{human_time()} 已编译完成忽略执行。', 'title': '镜像编译'}
+            else:
+                outputs['image'] = {'id': 'image', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': '镜像编译'}
         return json_response({'outputs': outputs})
 
     @auth('deploy.request.approve')
@@ -337,6 +352,72 @@ def post_request_ext2(request):
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_req')).start()
     return json_response(error=error)
 
+@auth('deploy.request.add|deploy.request.edit')
+def post_request_ext3(request):
+    form, error = JsonParser(
+        Argument('id', type=int, required=False),
+        Argument('deploy_id', type=int, help='参数错误'),
+        Argument('name', help='请输入申请标题'),
+        Argument('extra', type=list, help='请选择发布版本'),
+        Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
+        Argument('type', default='1'),
+        Argument('plan', required=False),
+        Argument('desc', required=False),
+    ).parse(request.body)
+    if error is None:
+        deploy = Deploy.objects.get(pk=form.deploy_id)
+        form.spug_version = Repository.make_spug_version(deploy.id)
+        if form.extra[0] == 'tag':
+            if not form.extra[1]:
+                return json_response(error='请选择要发布的版本')
+            form.version = form.extra[1]
+        elif form.extra[0] == 'branch':
+            if not form.extra[2]:
+                return json_response(error='请选择要发布的分支及Commit ID')
+            form.version = f'{form.extra[1]}#{form.extra[2][:6]}'
+        elif form.extra[0] == 'repository':
+            if not form.extra[1]:
+                return json_response(error='请选择要发布的版本')
+            repository = Repository.objects.get(pk=form.extra[1])
+            form.repository_id = repository.id
+            form.version = repository.version
+            form.spug_version = repository.spug_version
+            form.extra = ['repository'] + json.loads(repository.extra)
+        elif form.extra[0] == 'image':
+            if not form.extra[1]:
+                return json_response(error='请选择要发布的镜像版本')
+            dockerImage = DockerImage.objects.get(pk=form.extra[1])
+            form.image_id = dockerImage.id
+            form.version = dockerImage.version
+            form.spug_version = dockerImage.spug_version
+            form.extra = ['image'] + json.loads(dockerImage.extra)
+        else:
+            return json_response(error='参数错误')
+
+        # 获取环境，对应的环境是否是生产环境。 是则form.extra[0]只能是tag
+        if (deploy.env.prod and form.extra[0] != 'tag'):
+            if (form.extra[0] == 'repository'):
+                if (form.extra[1] != 'tag'):
+                    return json_response(error='生产环境只能选择tag代码')
+            elif (form.extra[0] == 'image'):
+                if (form.extra[1] != 'tag'):
+                    return json_response(error='生产环境只能选择tag代码')
+            else:
+                return json_response(error='生产环境只能选择tag代码')
+
+        form.extra = json.dumps(form.extra)
+        form.status = '0' if deploy.is_audit else '1'
+        form.host_ids = json.dumps(sorted(form.host_ids))
+        if form.id:
+            req = DeployRequest.objects.get(pk=form.id)
+            is_required_notify = deploy.is_audit and req.status == '-1'
+            DeployRequest.objects.filter(pk=form.id).update(created_by=request.user, reason=None, **form)
+        else:
+            req = DeployRequest.objects.create(created_by=request.user, **form)
+            is_required_notify = deploy.is_audit
+        if is_required_notify:
+            Thread(target=Helper.send_deploy_notify, args=(req, 'approve_req')).start()
+    return json_response(error=error)
 
 @auth('deploy.request.view')
 def get_request_info(request):

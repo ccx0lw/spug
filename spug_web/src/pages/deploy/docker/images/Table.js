@@ -32,7 +32,7 @@ function ComTable() {
 
   function _rebuild(info) {
     setLoading(info.id);
-    http.patch('/api/docker_images/', {id: info.id, action: 'rebuild'})
+    http.patch('/api/docker_image/', {id: info.id, action: 'rebuild'})
       .then(() => store.showConsole(info))
       .finally(() => setLoading(null))
   }
@@ -47,15 +47,15 @@ function ComTable() {
         <Table.Column title="构建时间" dataIndex="created_at"/>
         <Table.Column title="备注" dataIndex="remarks"/>
         <Table.Column title="状态" render={info => <Tag color={statusColorMap[info.status]}>{info.status_alias}</Tag>}/>
-        {hasPermission('deploy.docker_images.detail|deploy.docker_images.build|deploy.docker_images.log') && (
+        {hasPermission('deploy.docker_image.detail|deploy.docker_image.build|deploy.docker_image.log') && (
           <Table.Column width={180} title="操作" render={info => (
             <Action>
               <Action.Button
-                auth="deploy.docker_images.build"
+                auth="deploy.docker_image.build"
                 loading={loading === info.id}
                 disabled={info.remarks === 'SPUG AUTO MAKE'}
                 onClick={() => handleRebuild(info)}>构建</Action.Button>
-              <Action.Button auth="deploy.docker_images.build" onClick={() => store.showConsole(info)}>日志</Action.Button>
+              <Action.Button auth="deploy.docker_image.build" onClick={() => store.showConsole(info)}>日志</Action.Button>
             </Action>
           )}/>
         )}
@@ -74,7 +74,7 @@ function ComTable() {
       onReload={store.fetchRecords}
       actions={[
         <AuthButton
-          auth="deploy.docker_images.add"
+          auth="deploy.docker_image.add"
           type="primary"
           icon={<PlusOutlined/>}
           onClick={store.showForm}>新建</AuthButton>

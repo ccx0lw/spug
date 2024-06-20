@@ -75,7 +75,7 @@ export default observer(function () {
       {store.addVisible && (
         <AppSelector
         visible
-        filter={item => item.extend === '1'}
+        filter={item => item.extend === '1' || item.extend === '3'}
         onCancel={() => store.addVisible = false}
         onSelect={store.confirmAdd}/>
       )}

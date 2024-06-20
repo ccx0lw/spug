@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import { observer } from 'mobx-react';
-import { BranchesOutlined, BuildOutlined, TagOutlined, PlusOutlined, TagsOutlined } from '@ant-design/icons';
+import { BranchesOutlined, BuildOutlined, TagOutlined, PlusOutlined, TagsOutlined, ContainerOutlined } from '@ant-design/icons';
 import { Radio, Modal, Popover, Tag, Popconfirm, Tooltip, message } from 'antd';
 import { http, hasPermission } from 'libs';
 import { Action, AuthButton, TableCard } from 'components';
@@ -55,19 +55,21 @@ function ComTable() {
     title: '版本',
     className: S.min80,
     render: info => {
-      if (info['app_extend'] === '1') {
+      if (info['app_extend'] === '1' || info['app_extend'] === '3') {
         const [ext1] = info.extra || info.rep_extra;
         switch (ext1) {
           case 'branch':
-            return <div><BranchesOutlined/> {info.version}</div>
+            return <div><Tooltip title={"分支"}><BranchesOutlined/></Tooltip> {info.version}</div>
           case 'tag':
-            return <div><TagOutlined/> {info.version}</div>
+            return <div><Tooltip title={"Tag"}><TagOutlined/></Tooltip> {info.version}</div>
+          case 'image':
+            return <div><Tooltip title={"镜像"}><ContainerOutlined/></Tooltip> {info.version}</div>
           default:
-            return <div><TagsOutlined/> {info.version}</div>
+            return <div><Tooltip title={"构建仓库"}><TagsOutlined/></Tooltip> {info.version}</div>
         }
       } else {
         return (
-          <div><BuildOutlined/> {info.version}</div>
+          <div><Tooltip title={"脚本"}><BuildOutlined/></Tooltip> {info.version}</div>
         )
       }
     }

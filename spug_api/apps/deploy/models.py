@@ -7,6 +7,7 @@ from libs import ModelMixin, human_datetime
 from apps.account.models import User
 from apps.app.models import Deploy
 from apps.repository.models import Repository
+from apps.docker_image.models import DockerImage
 import json
 import os
 
@@ -27,6 +28,7 @@ class DeployRequest(models.Model, ModelMixin):
     )
     deploy = models.ForeignKey(Deploy, on_delete=models.CASCADE)
     repository = models.ForeignKey(Repository, null=True, on_delete=models.SET_NULL)
+    docker_image = models.ForeignKey(DockerImage, null=True, on_delete=models.SET_NULL)
     name = models.CharField(max_length=100)
     type = models.CharField(max_length=2, choices=TYPES, default='1')
     extra = models.TextField()

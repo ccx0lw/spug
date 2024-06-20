@@ -28,7 +28,7 @@ export default observer(function () {
   const tags = tagStore.records || []
 
   return (
-    <AuthDiv auth="deploy.docker_images.view">
+    <AuthDiv auth="deploy.docker_image.view">
       <Breadcrumb>
         <Breadcrumb.Item>首页</Breadcrumb.Item>
         <Breadcrumb.Item>应用发布</Breadcrumb.Item>

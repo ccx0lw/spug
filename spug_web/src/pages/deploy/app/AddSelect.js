@@ -40,6 +40,7 @@ class AddSelect extends React.Component {
     store.addVisible = false;
     store.ext3Visible = true;
     store.deploy = {
+      git_type: 'image',
       is_audit: false,
       rst_notify: {mode: '0'},
       host_ids: [],

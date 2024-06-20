@@ -18,7 +18,7 @@ export default observer(function () {
   const reducerState = (state, action) => {
     switch (action.type) {
       case 'UPDATE_DOCKERFILE_PARAMS':
-        const index = state.dockerfile_params.findIndex(param => param.hasOwnProperty(action.variable));
+        const index = state.dockerfile_params?.findIndex(param => param.hasOwnProperty(action.variable));
         let newDockerfileParams = [...state.dockerfile_params];
         
         if (index !== -1) {
@@ -39,7 +39,7 @@ export default observer(function () {
   const [loading, setLoading] = useState(false)
   const [template, setTemplate] = useState({})
   const [parameters, setParameters] = useState([])
-  const [state, dispatch] = useReducer(reducerState, { dockerfile_params: store.deploy.dockerfile_params })
+  const [state, dispatch] = useReducer(reducerState, { dockerfile_params: store.deploy.dockerfile_params||[] })
 
   const info = store.deploy
 
@@ -111,8 +111,8 @@ export default observer(function () {
           onUpdate={(variable, value) => {updateDockerfileParams(variable, value)}}/>
       </Card>
       <Form.Item
-        label="编译镜像前执行"
-        tooltip="在发布的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。（eg: 编译本地镜像）"
+        label="编译镜像"
+        tooltip="在编译镜像的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。（eg: 编译本地镜像）"
         extra={<span>{Tips}，此时还未进行文件变更，可进行一些发布前置操作。</span>}>
         <ACEditor
           readOnly={store.isReadOnly}
@@ -128,7 +128,7 @@ export default observer(function () {
       <Form.Item
         label="编译镜像后执行"
         style={{marginTop: 12, marginBottom: 24}}
-        tooltip="在发布的目标主机上运行，当前目录为已发布的应用目录，可执行任意自定义命令。（eg: 上传镜像）"
+        tooltip="在编译镜像的目标主机上运行，当前目录为已发布的应用目录，可执行任意自定义命令。（eg: 上传镜像）"
         extra={<span>{Tips}，可以在发布后进行重启服务等操作。</span>}>
         <ACEditor
           readOnly={store.isReadOnly}

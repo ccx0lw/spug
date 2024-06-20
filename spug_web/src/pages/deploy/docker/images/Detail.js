@@ -17,7 +17,7 @@ export default observer(function (props) {
 
   useEffect(() => {
     if (store.record.id && props.visible) {
-      http.get('/api/docker_images/request/', {params: {repository_id: store.record.id}})
+      http.get('/api/docker_image/request/', {params: {repository_id: store.record.id}})
         .then(res => setRequests(res))
         .finally(() => setFetching(false))
     }
@@ -25,7 +25,7 @@ export default observer(function (props) {
 
   function handleDelete() {
     setLoading(true);
-    http.delete('/api/docker_images/', {params: {id: store.record.id}})
+    http.delete('/api/docker_image/', {params: {id: store.record.id}})
       .then(() => {
         store.fetchRecords();
         store.detailVisible = false
@@ -42,7 +42,7 @@ export default observer(function (props) {
       onClose={() => store.detailVisible = false}
       footer={(
         <AuthDiv
-          auth="deploy.docker_images.del"
+          auth="deploy.docker_image.del"
           style={{display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end'}}>
           <span style={{color: '#999', fontSize: 12}}>Tips: 已关联发布申请的构建版本无法删除（删除发布申请时将同步删除该记录）。</span>
           <Button danger loading={loading} disabled={requests.length > 0} onClick={handleDelete}>删除</Button>

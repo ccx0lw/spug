@@ -11,7 +11,7 @@ import json
 import os
 
 
-class DockerImages(models.Model, ModelMixin):
+class DockerImage(models.Model, ModelMixin):
     STATUS = (
         ('0', '未开始'),
         ('1', '构建中'),
@@ -23,6 +23,7 @@ class DockerImages(models.Model, ModelMixin):
     deploy = models.ForeignKey(Deploy, on_delete=models.PROTECT)
     version = models.CharField(max_length=100)
     spug_version = models.CharField(max_length=50)
+    url = models.TextField()
     remarks = models.CharField(max_length=255, null=True)
     extra = models.TextField()
     status = models.CharField(max_length=2, choices=STATUS, default='0')

@@ -10,10 +10,12 @@ import { Select, DatePicker, Space } from 'antd';
 import { SearchForm, AuthDiv, AuthButton, Breadcrumb, AppSelector } from 'components';
 import Ext1Form from './Ext1Form';
 import Ext2Form from './Ext2Form';
+import Ext3Form from './Ext3Form';
 import Approve from './Approve';
 import ComTable from './Table';
 import Ext1Console from './Ext1Console';
 import Ext2Console from './Ext2Console';
+import Ext3Console from './Ext3Console';
 import BatchDelete from './BatchDelete';
 import Rollback from './Rollback';
 import { includes } from 'libs';
@@ -98,17 +100,23 @@ function Index() {
         onSelect={store.confirmAdd}/>
       {store.ext1Visible && <Ext1Form/>}
       {store.ext2Visible && <Ext2Form/>}
+      {store.ext3Visible && <Ext3Form/>}
       {store.batchVisible && <BatchDelete/>}
       {store.approveVisible && <Approve/>}
       {store.rollbackVisible && <Rollback/>}
       {store.tabs.length > 0 && (
         <Space className={styles.miniConsole}>
           {store.tabs.map(item => item.id ?
-            item.app_extend === '1' ? (
+            (item.app_extend === '1' ? (
               <Ext1Console key={item.id} request={item}/>
+            ) : 
+            (item.app_extend === '3' ? (
+              <Ext3Console key={item.id} request={item}/>
             ) : (
               <Ext2Console key={item.id} request={item}/>
-            ) : null)}
+            )))
+            : null
+            )}
         </Space>
       )}
     </AuthDiv>

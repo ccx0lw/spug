@@ -11,6 +11,8 @@ from apps.repository.models import Repository
 from apps.repository.utils import dispatch as build_repository
 from apps.deploy.models import DeployRequest
 from apps.deploy.helper import Helper, SpugError
+from apps.docker_image.models import DockerImage
+from apps.docker_image.utils import dispatch as build_docker_image
 from concurrent import futures
 from functools import partial
 import json
@@ -56,6 +58,8 @@ def dispatch(req, fail_mode=False):
 
         if req.deploy.extend == '1':
             _ext1_deploy(req, helper, env)
+        elif req.deploy.extend == '3':
+            _ext3_deploy(req, helper, env)
         else:
             _ext2_deploy(req, helper, env)
         req.status = '3'
@@ -221,6 +225,108 @@ def _ext2_deploy(req, helper, env):
         helper.send_step('local', 100, f'\r\n{human_time()} ** 发布成功 **')
 
 
+def _ext3_deploy(req, helper, env):
+    if not req.repository_id:
+        rep = Repository(
+            app_id=req.deploy.app_id,
+            env_id=req.deploy.env_id,
+            deploy_id=req.deploy_id,
+            version=req.version,
+            spug_version=req.spug_version,
+            extra=req.extra,
+            remarks='SPUG AUTO MAKE',
+            created_by_id=req.created_by_id
+        )
+        build_repository(rep, helper)
+        req.repository = rep
+    extras = json.loads(req.extra)
+    if extras[0] == 'repository':
+        extras = extras[1:]
+    if extras[0] == 'branch':
+        env.update(SPUG_GIT_BRANCH=extras[1], SPUG_GIT_COMMIT_ID=extras[2])
+    # TODO 后续实现，可以选择镜像直接发布，跟选择repository一样的逻辑
+    # if extras[0] == 'image':
+    #     extras = extras[1:]
+    else:
+        env.update(SPUG_GIT_TAG=extras[1])
+        
+    extend = req.deploy.extend_obj
+    
+    image_version = render_str(extend.image_version, env)
+    # 编译镜像的环境变量
+    env.update(SPUG_IMAGE_NAME=extend.image_name)
+    env.update(SPUG_IMAGE_VERSION=image_version)
+    env.update(SPUG_CONTAINER_REPOSITORY='')
+    env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX='')
+    
+    # 添加Dockerfile变量
+    if extend.dockerfile_params:
+        dockerfile_params = json.loads(extend.dockerfile_params)
+        if dockerfile_params:
+            for d in dockerfile_params:
+                for key, value in d.items():
+                    env[key]=value
+        
+    # 镜像编译阶段
+    if not req.docker_image_id:
+        rep = DockerImage(
+            app_id=req.deploy.app_id,
+            env_id=req.deploy.env_id,
+            deploy_id=req.deploy_id,
+            version=req.version,
+            spug_version=req.spug_version,
+            extra=req.extra,
+            remarks='SPUG AUTO MAKE',
+            created_by_id=req.created_by_id
+        )
+        new_env = AttrDict(env.items())
+        build_docker_image(rep, helper, new_env)
+        req.docker_image = rep
+        
+    # TODO 将镜像编译的环境写入(镜像的名字等)
+    
+    # 添加yaml变量
+    if extend.yaml_params:
+        yaml_params = json.loads(extend.yaml_params)
+        if yaml_params:
+            for d in yaml_params:
+                for key, value in d.items():
+                    env[key]=value
+        
+    if req.deploy.is_parallel:
+        threads, latest_exception = [], None
+        max_workers = max(10, os.cpu_count() * 5)
+        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for h_id in req.host_ids:
+                new_env = AttrDict(env.items())
+                t = executor.submit(_deploy_ext3_host, req, helper, h_id, new_env)
+                t.h_id = h_id
+                threads.append(t)
+            for t in futures.as_completed(threads):
+                exception = t.exception()
+                if exception:
+                    latest_exception = exception
+                    if not isinstance(exception, SpugError):
+                        helper.send_error(t.h_id, f'Exception: {exception}', False)
+                else:
+                    req.fail_host_ids.remove(t.h_id)
+        if latest_exception:
+            raise latest_exception
+    else:
+        host_ids = sorted(req.host_ids, reverse=True)
+        while host_ids:
+            h_id = host_ids.pop()
+            new_env = AttrDict(env.items())
+            try:
+                _deploy_ext3_host(req, helper, h_id, new_env)
+                req.fail_host_ids.remove(h_id)
+            except Exception as e:
+                helper.send_error(h_id, f'Exception: {e}', False)
+                for h_id in host_ids:
+                    helper.send_error(h_id, '终止发布', False)
+                raise e
+
+
 def _deploy_ext1_host(req, helper, h_id, env):
     helper.send_step(h_id, 1, f'\033[32m就绪√\033[0m\r\n{human_time()} 数据准备...        ')
     host = Host.objects.filter(pk=h_id).first()
@@ -322,3 +428,71 @@ def _deploy_ext2_host(helper, h_id, actions, env, spug_version):
             helper.remote(host.id, ssh, command)
 
     helper.send_step(h_id, 100, f'\r\n{human_time()} ** \033[32m发布成功\033[0m **')
+
+
+def _deploy_ext3_host(req, helper, h_id, env):
+    helper.send_step(h_id, 1, f'\033[32m就绪√\033[0m\r\n{human_time()} 数据准备...        ')
+    host = Host.objects.filter(pk=h_id).first()
+    if not host:
+        helper.send_error(h_id, 'no such host')
+    env.update({'SPUG_HOST_ID': h_id, 'SPUG_HOST_NAME': host.hostname})
+    extend = req.deploy.extend_obj
+    extend.dst_dir = render_str(extend.dst_dir, env)
+    extend.dst_repo = render_str(extend.dst_repo, env)
+    env.update(SPUG_DST_DIR=extend.dst_dir)
+    with host.get_ssh(default_env=env) as ssh:
+        base_dst_dir = os.path.dirname(extend.dst_dir)
+        code, _ = ssh.exec_command_raw(
+            f'mkdir -p {extend.dst_repo} {base_dst_dir} && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
+        if code == 0:
+            helper.send_error(host.id, f'检测到该主机的发布目录 {extend.dst_dir!r} 已存在，为了数据安全请自行备份后删除该目录，Spug 将会创建并接管该目录。')
+        if req.type == '2':
+            helper.send_step(h_id, 1, '\033[33m跳过√\033[0m\r\n')
+        # 不需要上传文件，镜像只需要透传过来就好
+        # else:
+        #     # clean
+        #     clean_command = f'ls -d {extend.deploy_id}_* 2> /dev/null | sort -t _ -rnk2 | tail -n +{extend.versions + 1} | xargs rm -rf'
+        #     helper.remote_raw(host.id, ssh, f'cd {extend.dst_repo} && {clean_command}')
+        #     # transfer files
+        #     tar_gz_file = f'{req.spug_version}.tar.gz'
+        #     try:
+        #         callback = helper.progress_callback(host.id)
+        #         ssh.put_file(
+        #             os.path.join(BUILD_DIR, tar_gz_file),
+        #             os.path.join(extend.dst_repo, tar_gz_file),
+        #             callback
+        #         )
+        #     except Exception as e:
+        #         helper.send_error(host.id, f'Exception: {e}')
+
+        #     command = f'cd {extend.dst_repo} && rm -rf {req.spug_version} && tar xf {tar_gz_file} && rm -f {req.deploy_id}_*.tar.gz'
+        #     helper.remote_raw(host.id, ssh, command)
+        #     helper.send_step(h_id, 1, '\033[32m完成√\033[0m\r\n')
+
+        # pre host
+        repo_dir = os.path.join(extend.dst_repo, req.spug_version)
+        
+        code, _ = ssh.exec_command_raw(
+            f'mkdir -p {repo_dir} {extend.dst_repo} && [ -e {repo_dir} ] && [ ! -L {repo_dir} ]')
+        if code == 0:
+            helper.send_step(h_id, 1, f'init dir {repo_dir}\r\n')
+        
+        if extend.hook_pre_host:
+            helper.send_step(h_id, 2, f'{human_time()} 发布前任务...       \r\n')
+            command = f'cd {repo_dir} && {extend.hook_pre_host}'
+            helper.remote(host.id, ssh, command)
+
+        # do deploy
+        helper.send_step(h_id, 3, f'{human_time()} 执行发布...        ')
+        helper.remote_raw(host.id, ssh, f'rm -f {extend.dst_dir} && ln -sfn {repo_dir} {extend.dst_dir}')
+        helper.send_step(h_id, 3, '\033[32m完成√\033[0m\r\n')
+
+        # post host
+        if extend.hook_post_host:
+            helper.send_step(h_id, 4, f'{human_time()} 发布后任务...       \r\n')
+            command = f'cd {extend.dst_dir} && {extend.hook_post_host}'
+            helper.remote(host.id, ssh, command)
+
+        helper.send_step(h_id, 100, f'\r\n{human_time()} ** \033[32m发布成功\033[0m **')
+        
+        ## 后续清理目录

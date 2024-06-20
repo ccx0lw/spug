@@ -28,7 +28,7 @@ export default observer(function Ext1Setup1() {
     } else {
       updateEnvs()
     }
-    initDefaultValue()
+    _initDefaultValue()
   }, [])
 
   const info = store.deploy;
@@ -50,7 +50,7 @@ export default observer(function Ext1Setup1() {
       modePlaceholder = '请输入'
   }
 
-  function initDefaultValue() {
+  function _initDefaultValue() {
     if (isEmpty(info['dst_dir'])) {
       info['dst_dir'] = "/var/spug/apps/$SPUG_ENV_KEY/$SPUG_APP_KEY"
     }

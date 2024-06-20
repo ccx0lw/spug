@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Django",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/spug_api/manage.py",
+            "args": ["runserver"],
+            "pythonPath": "${workspaceFolder}/spug_api/venv/bin/python",
+            "django": true
+        }
+    ]
+}
