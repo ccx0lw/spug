@@ -47,6 +47,11 @@ class RepositoryView(View):
             Argument('remarks', required=False)
         ).parse(request.body)
         if error is None:
+            if form.remarks is not None:
+                form.remarks = form.remarks.strip()
+                if form.remarks == 'SPUG AUTO MAKE BY IMAGE BUILD' or form.remarks == 'SPUG AUTO MAKE':
+                    form.remarks = ''
+            
             deploy = Deploy.objects.filter(pk=form.deploy_id).first()
             if not deploy:
                 return json_response(error='未找到指定发布配置')
@@ -134,8 +139,10 @@ def get_detail(request, r_id):
         return json_response(error='未找到指定构建记录')
     rds, counter = get_redis_connection(), 0
     if repository.remarks == 'SPUG AUTO MAKE':
-        req = repository.deployrequest_set.last()
+        req = repository.deployrequest_set.filter(repository_id=repository.id, spug_version=repository.spug_version).last()
         key = f'{settings.REQUEST_KEY}:{req.id}'
+    elif repository.remarks == 'SPUG AUTO MAKE BY IMAGE BUILD':
+        key = f'{settings.BUILD_IMAGE_KEY}:{repository.spug_version}'
     else:
         key = f'{settings.BUILD_KEY}:{repository.spug_version}'
     data = rds.lrange(key, counter, counter + 9)

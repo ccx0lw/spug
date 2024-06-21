@@ -103,7 +103,7 @@ export default observer(function Console() {
       visible
       width={fullscreen ? '100%' : 1000}
       title={[
-        <span key="1">构建控制台</span>,
+        <span key="1">编译镜像控制台</span>,
         <div key="2" className={styles.fullscreen} onClick={() => setFullscreen(!fullscreen)}>
           {fullscreen ? <FullscreenExitOutlined/> : <FullscreenOutlined/>}
         </div>
@@ -113,11 +113,11 @@ export default observer(function Console() {
       className={styles.console}
       maskClosable={false}>
       <Steps current={step} status={status}>
-        <StepItem title="构建准备" step={0}/>
-        <StepItem title="检出前任务" step={1}/>
-        <StepItem title="执行检出" step={2}/>
-        <StepItem title="检出后任务" step={3}/>
-        <StepItem title="执行打包" step={4}/>
+        <StepItem title="编译准备" step={0}/>
+        <StepItem title="数据准备" step={1}/>
+        <StepItem title="编译镜像" step={2}/>
+        <StepItem title="清理数据" step={3}/>
+        <StepItem title="上传镜像" step={4}/>
       </Steps>
       <Spin spinning={fetching}>
         <div className={styles.out}>

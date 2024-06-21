@@ -140,16 +140,13 @@ class FileTemplate(models.Model, ModelMixin):
         return type_to_name.get(type_key, 'Default Name')
     
     def save(self, *args, **kwargs):
-        type_to_name = dict(self.TYPES)
         self.name = self.get_name_from_type(self.type)
         super(FileTemplate, self).save(*args, **kwargs)
 
     class Meta:
         db_table = 'file_template'
         ordering = ('-id',)
-        constraints = [
-            UniqueConstraint(fields=['env_id', 'type'], name='unique_env_id_type')
-        ]
+        unique_together = (('env', 'type'))
         
 # 容器仓库地址,每个环境一个
 class ContainerRepository(models.Model, ModelMixin):

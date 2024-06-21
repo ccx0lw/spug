@@ -7,6 +7,7 @@ from django.db import close_old_connections
 from libs.utils import AttrDict, human_time, render_str
 from apps.host.models import Host
 from apps.config.utils import compose_configs
+from apps.config.models import FileTemplate
 from apps.repository.models import Repository
 from apps.repository.utils import dispatch as build_repository
 from apps.deploy.models import DeployRequest
@@ -71,6 +72,7 @@ def dispatch(req, fail_mode=False):
         DeployRequest.objects.filter(pk=req.id).update(
             status=req.status,
             repository=req.repository,
+            docker_image=req.docker_image,
             fail_host_ids=json.dumps(req.fail_host_ids),
         )
         helper.clear()
@@ -239,14 +241,15 @@ def _ext3_deploy(req, helper, env):
         )
         build_repository(rep, helper)
         req.repository = rep
+    else:
+        helper.send_info('local', f'\r\n \033[32m使用构建仓库\033[0m \r\n id:[{req.repository_id}] \r\n 环境:[{req.repository.env.name}] \r\n version:[{req.repository.version}] \r\n 创建时间:[{req.repository.created_at}] \r\n 创建人:[{req.repository.created_by.nickname}] \r\n \033[32m完成√\033[0m\r\n')
     extras = json.loads(req.extra)
     if extras[0] == 'repository':
         extras = extras[1:]
     if extras[0] == 'branch':
         env.update(SPUG_GIT_BRANCH=extras[1], SPUG_GIT_COMMIT_ID=extras[2])
-    # TODO 后续实现，可以选择镜像直接发布，跟选择repository一样的逻辑
-    # if extras[0] == 'image':
-    #     extras = extras[1:]
+    if extras[0] == 'image':
+        extras = extras[1:]
     else:
         env.update(SPUG_GIT_TAG=extras[1])
         
@@ -256,6 +259,7 @@ def _ext3_deploy(req, helper, env):
     # 编译镜像的环境变量
     env.update(SPUG_IMAGE_NAME=extend.image_name)
     env.update(SPUG_IMAGE_VERSION=image_version)
+    # TODO 查询镜像的仓库
     env.update(SPUG_CONTAINER_REPOSITORY='')
     env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX='')
     
@@ -276,15 +280,13 @@ def _ext3_deploy(req, helper, env):
             version=req.version,
             spug_version=req.spug_version,
             extra=req.extra,
-            remarks='SPUG AUTO MAKE',
-            created_by_id=req.created_by_id
+            remarks='SPUG AUTO MAKE BY IMAGE BUILD',
+            created_by_id=req.created_by_id,
+            repository=req.repository
         )
         new_env = AttrDict(env.items())
         build_docker_image(rep, helper, new_env)
         req.docker_image = rep
-        
-    # TODO 将镜像编译的环境写入(镜像的名字等)
-    
     # 添加yaml变量
     if extend.yaml_params:
         yaml_params = json.loads(extend.yaml_params)
@@ -443,31 +445,37 @@ def _deploy_ext3_host(req, helper, h_id, env):
     with host.get_ssh(default_env=env) as ssh:
         base_dst_dir = os.path.dirname(extend.dst_dir)
         code, _ = ssh.exec_command_raw(
-            f'mkdir -p {extend.dst_repo} {base_dst_dir} && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
+            f'mkdir -p {extend.dst_repo}/{req.spug_version} {base_dst_dir} && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
         if code == 0:
             helper.send_error(host.id, f'检测到该主机的发布目录 {extend.dst_dir!r} 已存在，为了数据安全请自行备份后删除该目录，Spug 将会创建并接管该目录。')
         if req.type == '2':
             helper.send_step(h_id, 1, '\033[33m跳过√\033[0m\r\n')
-        # 不需要上传文件，镜像只需要透传过来就好
-        # else:
-        #     # clean
-        #     clean_command = f'ls -d {extend.deploy_id}_* 2> /dev/null | sort -t _ -rnk2 | tail -n +{extend.versions + 1} | xargs rm -rf'
-        #     helper.remote_raw(host.id, ssh, f'cd {extend.dst_repo} && {clean_command}')
-        #     # transfer files
-        #     tar_gz_file = f'{req.spug_version}.tar.gz'
-        #     try:
-        #         callback = helper.progress_callback(host.id)
-        #         ssh.put_file(
-        #             os.path.join(BUILD_DIR, tar_gz_file),
-        #             os.path.join(extend.dst_repo, tar_gz_file),
-        #             callback
-        #         )
-        #     except Exception as e:
-        #         helper.send_error(host.id, f'Exception: {e}')
+        else:
+            # clean
+            clean_command = f'ls -d {extend.deploy_id}_* 2> /dev/null | sort -t _ -rnk2 | tail -n +{extend.versions + 1} | xargs rm -rf'
+            helper.remote_raw(host.id, ssh, f'cd {extend.dst_repo} && {clean_command}')
+            # 查询yaml模板文件，有则写入 并上传
+            template = FileTemplate.objects.filter(env_id=req.deploy.env_id, type='yaml').first()
+            if template is not None:
+                helper.send_step(host.id, 1, f'{human_time()} 写入 {template.name} 文件       ')
+                helper.remote_raw(host.id, ssh, f'cd {extend.dst_repo} && {clean_command}')
+                helper.send_step(host.id, 1, f'{os.path.join(BUILD_DIR, template.name)}')
+                try:
+                    with open(os.path.join(BUILD_DIR, template.name), 'w', encoding='utf-8') as file:
+                        file.write(template.body)
+                    
+                    callback = helper.progress_callback(host.id)
+                    ssh.put_file(
+                        os.path.join(BUILD_DIR, template.name),
+                        os.path.join(extend.dst_repo, req.spug_version, template.name),
+                        callback
+                    )
+                except Exception as e:
+                    helper.send_error(host.id, f'Exception: {e}')
+            else:
+                helper.send_step(host.id, 1, f'{human_time()} {template.name} 模板不存在      ')  
 
-        #     command = f'cd {extend.dst_repo} && rm -rf {req.spug_version} && tar xf {tar_gz_file} && rm -f {req.deploy_id}_*.tar.gz'
-        #     helper.remote_raw(host.id, ssh, command)
-        #     helper.send_step(h_id, 1, '\033[32m完成√\033[0m\r\n')
+            helper.send_step(host.id, 1, '\033[32m完成√\033[0m\r\n')
 
         # pre host
         repo_dir = os.path.join(extend.dst_repo, req.spug_version)

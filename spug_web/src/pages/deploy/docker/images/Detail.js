@@ -59,6 +59,7 @@ export default observer(function (props) {
           <Descriptions.Item label="Git标签">{extra2}</Descriptions.Item>
         )}
         <Descriptions.Item label="内部版本">{record.spug_version}</Descriptions.Item>
+        <Descriptions.Item label="镜像URL">{record.url}</Descriptions.Item>
         <Descriptions.Item label="构建时间">{record.created_at}</Descriptions.Item>
         <Descriptions.Item label="备注信息">{record.remarks}</Descriptions.Item>
         <Descriptions.Item label="构建人">{record.created_by_user}</Descriptions.Item>

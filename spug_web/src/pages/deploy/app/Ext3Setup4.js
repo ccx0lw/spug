@@ -94,7 +94,7 @@ export default observer(function () {
       </Card>
       <Form.Item
         label="应用发布前执行"
-        tooltip="在发布的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。"
+        tooltip="在发布的目标主机上运行，当前目录为目标主机上待发布的源代码目录，可执行任意自定义命令。（如果配置了yaml模板，则需要自己用envsubst替换模板文件生成新的文件）"
         extra={<span>{Tips}，此时还未进行文件变更，可进行一些发布前置操作。</span>}>
         <ACEditor
           readOnly={store.isReadOnly}

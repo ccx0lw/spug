@@ -111,9 +111,9 @@ export default observer(function () {
       confirmLoading={loading}
       onOk={handleSubmit}>
       <Form form={form} initialValues={store.record} labelCol={{span: 5}} wrapperCol={{span: 17}}>
-        <Form.Item required name="version" label="构建版本">
+        {/* <Form.Item required name="version" label="构建版本">
           <Input placeholder="请输入构建版本"/>
-        </Form.Item>
+        </Form.Item> */}
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
             根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"

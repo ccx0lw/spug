@@ -78,7 +78,7 @@ DATABASES = {
     'default': {
         'ATOMIC_REQUESTS': True,
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'spug',
+        'NAME': 'spug_240621',
         'USER': 'root',
         'PASSWORD': '123456',
         'HOST': '192.168.100.22',
@@ -122,7 +122,8 @@ MONITOR_KEY = 'spug:monitor'
 MONITOR_WORKER_KEY = 'spug:monitor:worker'
 EXEC_WORKER_KEY = 'spug:exec:worker'
 REQUEST_KEY = 'spug:request'
-BUILD_KEY = 'spug:build'
+BUILD_KEY = 'spug:build:repo'
+BUILD_IMAGE_KEY = 'spug:build:image'
 REPOS_DIR = os.path.join(os.path.dirname(os.path.dirname(BASE_DIR)), 'repos')
 BUILD_DIR = os.path.join(REPOS_DIR, 'build')
 TRANSFER_DIR = os.path.join(BASE_DIR, 'storage', 'transfer')

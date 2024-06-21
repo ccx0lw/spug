@@ -169,6 +169,10 @@ class ConfigView(View):
             Argument('desc', required=False)
         ).parse(request.body)
         if error is None:
+            # 确保key以_SPUG_开头
+            if not form.key.startswith('_SPUG_'):
+                return json_response(error='Key必须以_SPUG_开头')
+            
             form.value = form.value.strip()
             form.updated_at = human_datetime()
             form.updated_by = request.user

@@ -42,16 +42,40 @@ class DockerImageView(View):
     def post(self, request):
         form, error = JsonParser(
             Argument('deploy_id', type=int, help='参数错误'),
-            Argument('version', help='请输入构建版本'),
             Argument('extra', type=list, help='参数错误'),
             Argument('remarks', required=False)
         ).parse(request.body)
         if error is None:
+            if form.remarks is not None:
+                form.remarks = form.remarks.strip()
+                if form.remarks == 'SPUG AUTO MAKE BY IMAGE BUILD' or form.remarks == 'SPUG AUTO MAKE':
+                    form.remarks = ''
+            
             deploy = Deploy.objects.filter(pk=form.deploy_id).first()
             if not deploy:
                 return json_response(error='未找到指定发布配置')
+            if form.extra[0] == 'tag':
+                if not form.extra[1]:
+                    return json_response(error='请选择要发布的版本')
+                form.version = form.extra[1]
+            elif form.extra[0] == 'branch':
+                if not form.extra[2]:
+                    return json_response(error='请选择要发布的分支及Commit ID')
+                form.version = f'{form.extra[1]}#{form.extra[2][:6]}'
+            else:
+                return json_response(error='参数错误')
+
+            # 获取环境，对应的环境是否是生产环境。 是则form.extra[0]只能是tag
+            if (deploy.env.prod and form.extra[0] != 'tag'):
+                if (form.extra[0] == 'repository'):
+                    if (form.extra[1] != 'tag'):
+                        return json_response(error='生产环境只能选择tag代码')
+                else:
+                    return json_response(error='生产环境只能选择tag代码')
+                
             form.extra = json.dumps(form.extra)
             form.spug_version = DockerImage.make_spug_version(deploy.id)
+            
             rep = DockerImage.objects.create(
                 app_id=deploy.app_id,
                 env_id=deploy.env_id,
@@ -113,17 +137,21 @@ def get_detail(request, r_id):
         return json_response(error='未找到指定构建记录')
     rds, counter = get_redis_connection(), 0
     if docker_image.remarks == 'SPUG AUTO MAKE':
-        req = docker_image.deployrequest_set.last()
-        key = f'{settings.REQUEST_KEY}:{req.id}'
+        req = docker_image.deployrequest_set.filter(repository_id=docker_image.id, spug_version=docker_image.spug_version).last()
+        if req is not None:
+            key = f'{settings.REQUEST_KEY}:{req.id}'
+        else:
+            # 处理没有找到 deployrequest 的情况
+            return json_response(error='未找到指定的 deployrequest')
     else:
-        key = f'{settings.BUILD_KEY}:{docker_image.spug_version}'
+        key = f'{settings.BUILD_IMAGE_KEY}:{docker_image.spug_version}'
     data = rds.lrange(key, counter, counter + 9)
     response = AttrDict(data='', step=0, s_status='process', status=docker_image.status)
     while data:
         for item in data:
             counter += 1
             item = json.loads(item.decode())
-            if item['key'] == 'local':
+            if item['key'] == 'image':
                 if 'data' in item:
                     response.data += item['data']
                 if 'step' in item:

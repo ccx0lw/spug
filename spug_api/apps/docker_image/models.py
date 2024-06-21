@@ -5,6 +5,7 @@ from django.db import models
 from django.conf import settings
 from libs.mixins import ModelMixin
 from apps.app.models import App, Environment, Deploy
+from apps.repository.models import Repository
 from apps.account.models import User
 from datetime import datetime
 import json
@@ -21,6 +22,7 @@ class DockerImage(models.Model, ModelMixin):
     app = models.ForeignKey(App, on_delete=models.PROTECT)
     env = models.ForeignKey(Environment, on_delete=models.PROTECT)
     deploy = models.ForeignKey(Deploy, on_delete=models.PROTECT)
+    repository = models.ForeignKey(Repository, on_delete=models.PROTECT, null=True)
     version = models.CharField(max_length=100)
     spug_version = models.CharField(max_length=50)
     url = models.TextField()
@@ -59,3 +61,5 @@ class DockerImage(models.Model, ModelMixin):
     class Meta:
         db_table = 'docker_images'
         ordering = ('-id',)
+        # 去掉唯一
+        # unique_together = (('app', 'env', 'version'),)

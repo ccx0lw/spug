@@ -63,7 +63,7 @@ export default observer(function () {
       onOk={handleSubmit}>
       <Form form={form} initialValues={store.record} labelCol={{span: 6}} wrapperCol={{span: 14}}>
         <Form.Item required name="key" label="Key">
-          <Input disabled={isModify} placeholder="请输入"/>
+          <Input disabled={isModify} defaultValue={isModify ? undefined : '_SPUG_'} placeholder="请输入"/>
         </Form.Item>
         <Form.Item name="value" label="Value">
           <Input.TextArea placeholder="请输入"/>
