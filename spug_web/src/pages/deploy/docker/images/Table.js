@@ -53,7 +53,7 @@ function ComTable() {
               <Action.Button
                 auth="deploy.docker_image.build"
                 loading={loading === info.id}
-                disabled={info.remarks === 'SPUG AUTO MAKE'}
+                disabled={info.remarks === 'SPUG AUTO MAKE' || info.status === '5'}
                 onClick={() => handleRebuild(info)}>构建</Action.Button>
               <Action.Button auth="deploy.docker_image.build" onClick={() => store.showConsole(info)}>日志</Action.Button>
             </Action>

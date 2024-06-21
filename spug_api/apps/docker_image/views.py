@@ -145,25 +145,27 @@ def get_detail(request, r_id):
             return json_response(error='未找到指定的 deployrequest')
     else:
         key = f'{settings.BUILD_IMAGE_KEY}:{docker_image.spug_version}'
+    
+    
+    outputs = {}
+    outputs['local'] = {'id': 'local', 'data': '', 'title': '代码构建'}
+    outputs['image'] = {'id': 'image', 'data': '', 'title': '镜像编译'}
+    response = AttrDict(data='', outputs= outputs, step=0, s_status='process', status=docker_image.status)
     data = rds.lrange(key, counter, counter + 9)
-    response = AttrDict(data='', step=0, s_status='process', status=docker_image.status)
     while data:
         for item in data:
             counter += 1
             item = json.loads(item.decode())
-            if item['key'] == 'image':
+            if item['key'] in outputs:
                 if 'data' in item:
-                    response.data += item['data']
+                    outputs[item['key']]['data'] += item['data']
                 if 'step' in item:
-                    response.step = item['step']
+                    outputs[item['key']]['step'] = item['step']
                 if 'status' in item:
-                    response.status = item['status']
+                    outputs[item['key']]['status'] = item['status']
         data = rds.lrange(key, counter, counter + 9)
-    response.index = counter
-    if docker_image.status in ('0', '1'):
-        response.data = f'{human_time()} 建立连接...        ' + response.data
-    elif not response.data:
-        response.data = f'{human_time()} 读取数据...        \r\n\r\n未读取到数据，Spug 仅保存最近2周的构建日志。'
-    else:
-        response.data = f'{human_time()} 读取数据...        ' + response.data
+    response['index'] = counter
+    if counter == 0:
+        for item in outputs:
+            outputs[item]['data'] += '\r\n\r\n未读取到数据，Spug 仅保存最近2周的日志信息。'
     return json_response(response)
