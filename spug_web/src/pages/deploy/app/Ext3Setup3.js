@@ -87,7 +87,7 @@ export default observer(function () {
           </Form.Item>
         </Col>
         <Col span={10}>
-          <Form.Item required label="镜像版本" tooltip="镜像版本，支持变量配置 eg: $SPUG_GIT_TAG">
+          <Form.Item required label="镜像版本" tooltip="镜像版本，支持变量配置 eg: $SPUG_GIT_TAG ; 设置变量会验证镜像不能重复">
             <Input value={info['image_version']} onChange={e => info['image_version'] = e.target.value} placeholder="请输入镜像版本"/>
           </Form.Item>
         </Col>
