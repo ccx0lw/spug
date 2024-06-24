@@ -8,7 +8,7 @@ import { observer } from 'mobx-react';
 import { FullscreenOutlined, FullscreenExitOutlined, LoadingOutlined } from '@ant-design/icons';
 import { FitAddon } from 'xterm-addon-fit';
 import { Terminal } from 'xterm';
-import { Modal, Steps, Spin } from 'antd';
+import { Modal, Steps, Spin, Tag } from 'antd';
 import { X_TOKEN, http } from 'libs';
 import styles from './index.module.less';
 import store from './store';
@@ -103,7 +103,15 @@ export default observer(function Console() {
       visible
       width={fullscreen ? '100%' : 1000}
       title={[
-        <span key="1">构建控制台</span>,
+        <span key="1">
+          <div>
+            <span>构建控制台</span>
+            {store.record.app_name ? "【"+store.record.app_name+"】" : null}
+            {store.record.version ? <Tag color='#f50'>{store.record.version}</Tag> : null}
+            {store.record.env_name ? <Tag color="#108ee9">{store.record.env_name}</Tag> : null}
+            {store.record.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+          </div>
+        </span>,
         <div key="2" className={styles.fullscreen} onClick={() => setFullscreen(!fullscreen)}>
           {fullscreen ? <FullscreenExitOutlined/> : <FullscreenOutlined/>}
         </div>

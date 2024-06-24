@@ -6,10 +6,12 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { LoadingOutlined, SyncOutlined } from '@ant-design/icons';
-import { Modal, Form, Input, Select, Button, message } from 'antd';
+import { Modal, Form, Input, Select, Button, message, Tag } from 'antd';
 import http from 'libs/http';
 import store from './store';
 import lds from 'lodash';
+import tagStore from 'pages/config/tag/store';
+import moment from 'moment';
 
 export default observer(function () {
   const [form] = Form.useForm();
@@ -20,15 +22,19 @@ export default observer(function () {
   const [extra1, setExtra1] = useState();
   const [extra2, setExtra2] = useState();
   const [versions, setVersions] = useState({});
+  const [appTags, setAppTags] = useState([]);
+  const [repositories, setRepositories] = useState([]);
 
   useEffect(() => {
     fetchVersions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    setAppTags(tagStore.records)
   }, [])
 
-  function _setDefault(type, new_extra, new_versions) {
+  function _setDefault(type, new_extra, new_versions, new_repositories) {
     const now_extra = new_extra || extra;
     const now_versions = new_versions || versions;
+    const now_repositories = new_repositories || repositories;
     const {branches, tags} = now_versions;
     if (type === 'branch') {
       let [branch, commit] = [now_extra[1], null];
@@ -36,17 +42,24 @@ export default observer(function () {
         commit = lds.get(branches[branch], '0.id')
       } else {
         branch = lds.get(Object.keys(branches), 0)
-        commit = lds.get(branches, `${branch}.0.id`)
+        commit = lds.get(branches, [branch, 0, 'id'])
       }
       setExtra1(branch)
       setExtra2(commit)
-    } else {
+    } else if (type === 'tag') {
       setExtra1(lds.get(Object.keys(tags), 0))
+      setExtra2(null)
+    } else {
+      setExtra1(lds.get(now_repositories, '0.id'))
       setExtra2(null)
     }
   }
 
-  function _initial(versions) {
+  function _initial(versions, repositories) {
+    if (store.deploy.env_prod) {
+      return _setDefault('tags', null, null, null)
+    }
+
     const {branches, tags} = versions;
     if (branches && tags) {
       for (let item of store.records) {
@@ -54,7 +67,7 @@ export default observer(function () {
           const type = item.extra[0];
           setExtra(item.extra);
           setGitType(type);
-          return _setDefault(type, item.extra, versions);
+          return _setDefault(type, item.extra, versions, repositories);
         }
       }
       setGitType('branch');
@@ -67,17 +80,25 @@ export default observer(function () {
 
   function fetchVersions() {
     setFetching(true);
-    http.get(`/api/app/deploy/${store.deploy.id}/versions/`, {timeout: 120000})
-      .then(res => {
-        setVersions(res);
-        _initial(res)
+    const deploy_id = store.deploy.id;
+    const p1 = http.get(`/api/app/deploy/${deploy_id}/versions/`, {timeout: 300000});
+    const p2 = http.get('/api/repository/', {params: {deploy_id}});
+    Promise.all([p1, p2])
+      .then(([res1, res2]) => {
+        _initial(res1, res2);
+        setVersions(res1);
+        var tmp = res2;
+        if (store.deploy.env_prod) {
+          tmp = res2.filter(item => item?.extra?.length > 0 && item?.extra[0] == 'tag');
+        };
+        setRepositories(tmp);
       })
-      .finally(() => setFetching(false))
+      .finally(() => setFetching(false));
   }
 
   function switchType(v) {
     setGitType(v);
-    _setDefault(v)
+    _setDefault(v);
   }
 
   function switchExtra1(v) {
@@ -106,7 +127,16 @@ export default observer(function () {
       visible
       width={800}
       maskClosable={false}
-      title="新建构建"
+      title={
+        <div>
+          {store.deploy.env_name ? <Tag color="#108ee9">{store.deploy.env_name}</Tag> : null}
+          <span>新建镜像编译【<b>{store.deploy.app_name}</b>】</span>
+          {store.deploy.app_rel_tags?.length > 0 && Array.isArray(appTags) ? store.deploy.app_rel_tags.map(tid => (
+            appTags.find(item => item.id === tid) ? <Tag style={{ border: 'none' }} color="orange" key={`tag-${tid}`}>{appTags.find(item => item.id === tid).name}</Tag> : null
+          )) : null}
+          {store.deploy.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+        </div>
+      }
       onCancel={() => store.formVisible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
@@ -124,6 +154,7 @@ export default observer(function () {
               <Select value={git_type} onChange={switchType} style={{width: 100}}>
                 <Select.Option value="branch">Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
+                <Select.Option value="repository">构建仓库</Select.Option>
               </Select>
               <Select
                 showSearch
@@ -134,7 +165,7 @@ export default observer(function () {
                 filterOption={(input, option) => option.props.children.toLowerCase().indexOf(input.toLowerCase()) >= 0}>
                 {git_type === 'branch' ? (
                   Object.keys(branches || {}).map(b => <Select.Option key={b} value={b}>{b}</Select.Option>)
-                ) : (
+                ) : git_type === 'tag' ? (
                   Object.entries(tags || {}).map(([tag, info]) => (
                     <Select.Option key={tag} value={tag}>
                       <div style={{display: 'flex', justifyContent: 'space-between'}}>
@@ -144,6 +175,15 @@ export default observer(function () {
                           textOverflow: 'ellipsis'
                         }}>{`${tag} ${info.author} ${info.message}`}</span>
                         <span style={{color: '#999', fontSize: 12}}>{info['date']} </span>
+                      </div>
+                    </Select.Option>
+                  ))
+                ) : (
+                  repositories.map(item => (
+                    <Select.Option key={item.id} value={item.id} content={item.version}>
+                      <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                        <span>{item.version}</span>
+                        <span style={{color: '#999', fontSize: 12}}>构建于 {moment(item.created_at).fromNow()}</span>
                       </div>
                     </Select.Option>
                   ))

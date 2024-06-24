@@ -62,7 +62,7 @@ function ComTable() {
             return <div><Tooltip title={"分支"}><BranchesOutlined/></Tooltip> {info.version}</div>
           case 'tag':
             return <div><Tooltip title={"Tag"}><TagOutlined/></Tooltip> {info.version}</div>
-          case 'image':
+          case 'docker_image':
             return <div><Tooltip title={"镜像"}><ContainerOutlined/></Tooltip> {info.version}</div>
           default:
             return <div><Tooltip title={"构建仓库"}><TagsOutlined/></Tooltip> {info.version}</div>

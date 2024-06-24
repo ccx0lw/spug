@@ -17,7 +17,7 @@ export default observer(function (props) {
 
   useEffect(() => {
     if (store.record.id && props.visible) {
-      http.get('/api/docker_image/request/', {params: {repository_id: store.record.id}})
+      http.get('/api/docker_image/request/', {params: {docker_image_id: store.record.id}})
         .then(res => setRequests(res))
         .finally(() => setFetching(false))
     }

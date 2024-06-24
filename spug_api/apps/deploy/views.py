@@ -383,14 +383,15 @@ def post_request_ext3(request):
             form.version = repository.version
             form.spug_version = repository.spug_version
             form.extra = ['repository'] + json.loads(repository.extra)
-        elif form.extra[0] == 'image':
+        elif form.extra[0] == 'docker_image':
             if not form.extra[1]:
                 return json_response(error='请选择要发布的镜像版本')
-            dockerImage = DockerImage.objects.get(pk=form.extra[1])
-            form.image_id = dockerImage.id
+            dockerImage = DockerImage.objects.get(id=form.extra[1])
+            form.docker_image_id = dockerImage.id
+            form.repository_id = dockerImage.repository.id
             form.version = dockerImage.version
             form.spug_version = dockerImage.spug_version
-            form.extra = ['image'] + json.loads(dockerImage.extra)
+            form.extra = ['docker_image'] + json.loads(dockerImage.extra)
         else:
             return json_response(error='参数错误')
 
@@ -399,7 +400,7 @@ def post_request_ext3(request):
             if (form.extra[0] == 'repository'):
                 if (form.extra[1] != 'tag'):
                     return json_response(error='生产环境只能选择tag代码')
-            elif (form.extra[0] == 'image'):
+            elif (form.extra[0] == 'docker_image'):
                 if (form.extra[1] != 'tag'):
                     return json_response(error='生产环境只能选择tag代码')
             else:

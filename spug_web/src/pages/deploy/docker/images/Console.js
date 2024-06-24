@@ -3,35 +3,27 @@
  * Copyright: (c) <fcjava@163.com>
  * Released under the AGPL-3.0 License.
  */
-import React, { useState, useEffect, useRef } from 'react';
-import { observer } from 'mobx-react';
-import { FullscreenOutlined, FullscreenExitOutlined, LoadingOutlined } from '@ant-design/icons';
-import { FitAddon } from 'xterm-addon-fit';
-import { Terminal } from 'xterm';
-import { Modal, Steps, Spin } from 'antd';
-import { X_TOKEN, http } from 'libs';
+import React, { useEffect, useState } from 'react';
+import { observer, useLocalStore } from 'mobx-react';
+import { Modal, Collapse, Steps, Skeleton, Tag } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
+import OutView from './OutView';
+import { http, X_TOKEN } from 'libs';
 import styles from './index.module.less';
 import store from './store';
 
 export default observer(function Console() {
-  const el = useRef()
-  const [term] = useState(new Terminal({disableStdin: true}))
-  const [fullscreen, setFullscreen] = useState(false);
-  const [step, setStep] = useState(0);
-  const [status, setStatus] = useState('process');
+  const outputs = useLocalStore(() => ({}));
+  const terms = useLocalStore(() => ({}));
   const [fetching, setFetching] = useState(true);
 
   useEffect(() => {
     let socket;
-    initialTerm()
     http.get(`/api/docker_image/${store.record.id}/`)
       .then(res => {
-        term.write(res.data)
-        setStep(res.step)
+        Object.assign(outputs, res.outputs)
         if (res.status === '1') {
           socket = _makeSocket(res.index)
-        } else {
-          setStatus('wait')
         }
       })
       .finally(() => setFetching(false))
@@ -42,88 +34,111 @@ export default observer(function Console() {
   function _makeSocket(index = 0) {
     const token = store.record.spug_version;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws/build/${token}/?x-token=${X_TOKEN}`);
+    const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws/build_image/${token}/?x-token=${X_TOKEN}`);
     socket.onopen = () => socket.send(String(index));
     socket.onmessage = e => {
       if (e.data === 'pong') {
         socket.send(String(index))
       } else {
         index += 1;
-        const {data, step, status} = JSON.parse(e.data);
-        if (data !== undefined) term.write(data);
-        if (step !== undefined) setStep(step);
-        if (status !== undefined) setStatus(status);
+        const {key, data, step, status} = JSON.parse(e.data);
+        if (!outputs[key]) return
+        if (data !== undefined) {
+          outputs[key].data += data
+          if (terms[key]) terms[key].write(data)
+        }
+        if (step !== undefined) outputs[key].step = step;
+        if (status !== undefined) outputs[key].status = status;
       }
     }
     socket.onerror = () => {
-      setStatus('error')
-      term.reset()
-      term.write('\u001b[31mWebsocket connection failed!\u001b[0m')
+      for (let key of Object.keys(outputs)) {
+        outputs[key]['status'] = 'error'
+        outputs[key].data = '\u001b[31mWebsocket connection failed!\u001b[0m'
+        if (terms[key]) {
+          terms[key].reset()
+          terms[key].write('\u001b[31mWebsocket connection failed!\u001b[0m')
+        }
+      }
     }
     return socket
   }
 
-  useEffect(() => {
-    term.fit && term.fit()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullscreen])
-
-  function initialTerm() {
-    const fitPlugin = new FitAddon()
-    term.loadAddon(fitPlugin)
-    term.setOption('fontFamily', 'Source Code Pro, Courier New, Courier, Monaco, monospace, PingFang SC, Microsoft YaHei')
-    term.setOption('theme', {background: '#fafafa', foreground: '#000', selection: '#999'})
-    term.attachCustomKeyEventHandler((arg) => {
-      if (arg.ctrlKey && arg.code === 'KeyC' && arg.type === 'keydown') {
-        document.execCommand('copy')
-        return false
-      }
-      return true
-    })
-    term.open(el.current)
-    term.fit = () => fitPlugin.fit()
-    fitPlugin.fit()
-  }
-
-  function handleClose() {
-    store.fetchRecords();
-    store.logVisible = false
-  }
-
   function StepItem(props) {
     let icon = null;
-    if (props.step === step && status === 'process') {
-      icon = <LoadingOutlined style={{fontSize: 32}}/>
+    if (props.step === props.item.step && props.item.status !== 'error') {
+      icon = <LoadingOutlined/>
     }
     return <Steps.Step {...props} icon={icon}/>
   }
 
+  function handleSetTerm(term, key) {
+    if (outputs[key] && outputs[key].data) {
+      term.write(outputs[key].data)
+    }
+    terms[key] = term
+  }
+
+  let {local, image} = outputs;
+
   return (
-    <Modal
-      visible
-      width={fullscreen ? '100%' : 1000}
-      title={[
-        <span key="1">编译镜像控制台</span>,
-        <div key="2" className={styles.fullscreen} onClick={() => setFullscreen(!fullscreen)}>
-          {fullscreen ? <FullscreenExitOutlined/> : <FullscreenOutlined/>}
-        </div>
-      ]}
-      footer={null}
-      onCancel={handleClose}
-      className={styles.console}
-      maskClosable={false}>
-      <Steps current={step} status={status}>
-        <StepItem title="编译准备" step={0}/>
-        <StepItem title="数据准备" step={1}/>
-        <StepItem title="编译镜像" step={2}/>
-        <StepItem title="清理数据" step={3}/>
-        <StepItem title="上传镜像" step={4}/>
-      </Steps>
-      <Spin spinning={fetching}>
-        <div className={styles.out}>
-          <div ref={el}/>
-        </div>
-      </Spin>
-    </Modal>
+    <div>
+      <Modal
+        visible={true}
+        width="70%"
+        footer={null}
+        maskClosable={false}
+        className={styles.console}
+        onCancel={() => store.closeConsole()}
+        title={
+          <div>
+            镜像编译控制台
+            {store.record.app_name ? "【"+store.record.app_name+"】" : null}
+            {store.record.version ? <Tag color='#f50'>{store.record.version}</Tag> : null}
+            {store.record.env_name ? <Tag color="#108ee9">{store.record.env_name}</Tag> : null}
+            {store.record.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+          </div>
+        }>
+          <Skeleton loading={fetching} active>
+            {local && (
+              <Collapse defaultActiveKey={['0']} className={styles.collapse} style={{marginBottom: 24}}>
+                <Collapse.Panel header={(
+                  <div className={styles.header}>
+                    <b className={styles.title}>{local.title}</b>
+                    <Steps size="small" className={styles.step} current={local.step} status={local.status} style={{margin: 0}}>
+                      <StepItem title="构建准备" item={local} step={0}/>
+                      <StepItem title="检出前任务" item={local} step={1}/>
+                      <StepItem title="执行检出" item={local} step={2}/>
+                      <StepItem title="检出后任务" item={local} step={3}/>
+                      <StepItem title="执行打包" item={local} step={4}/>
+                    </Steps>
+                  </div>
+                )}>
+                  <OutView setTerm={term => handleSetTerm(term, 'local')}/>
+                </Collapse.Panel>
+              </Collapse>
+            )}
+
+            {image && (
+              <Collapse defaultActiveKey={['0']} className={styles.collapse} style={{marginBottom: 24}}>
+                <Collapse.Panel header={(
+                  <div className={styles.header}>
+                    <b className={styles.title}>{image.title}</b>
+                    <Steps size="small" className={styles.step} current={image.step} status={image.status} style={{margin: 0}}>
+                      <StepItem title="编译准备" item={image} step={0}/>
+                      <StepItem title="数据准备" item={image} step={1}/>
+                      <StepItem title="编译镜像" item={image} step={2}/>
+                      <StepItem title="清理数据" item={image} step={3}/>
+                      <StepItem title="上传镜像" item={image} step={4}/>
+                    </Steps>
+                  </div>
+                )}>
+                  <OutView setTerm={term => handleSetTerm(term, 'image')}/>
+                </Collapse.Panel>
+              </Collapse>
+            )}
+          </Skeleton>
+      </Modal>
+    </div>
   )
 })

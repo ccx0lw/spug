@@ -46,10 +46,19 @@ class Store {
     this.addVisible = false;
   };
 
-  showConsole = (info) => {
-    this.record = info;
-    this.logVisible = true
+  showConsole = (info, isClose) => {
+    if (isClose) {
+      
+    } else {
+      this.record = info
+      this.logVisible = true
+    }
   };
+
+  closeConsole = () => {
+    this.fetchRecords()
+    this.logVisible = false
+  }
 
   showDetail = (info) => {
     this.record = info;

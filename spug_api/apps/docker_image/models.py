@@ -22,7 +22,7 @@ class DockerImage(models.Model, ModelMixin):
     app = models.ForeignKey(App, on_delete=models.PROTECT)
     env = models.ForeignKey(Environment, on_delete=models.PROTECT)
     deploy = models.ForeignKey(Deploy, on_delete=models.PROTECT)
-    repository = models.ForeignKey(Repository, on_delete=models.PROTECT, null=True)
+    repository = models.ForeignKey(Repository, on_delete=models.SET_NULL, null=True)
     version = models.CharField(max_length=100)
     spug_version = models.CharField(max_length=50)
     url = models.TextField()
@@ -46,6 +46,8 @@ class DockerImage(models.Model, ModelMixin):
             tmp['app_rel_tags'] = json.loads(self.app_rel_tags) if self.app_rel_tags else []
         if hasattr(self, 'env_name'):
             tmp['env_name'] = self.env_name
+        if hasattr(self, 'env_prod'):
+            tmp['env_prod'] = self.env_prod
         if hasattr(self, 'created_by_user'):
             tmp['created_by_user'] = self.created_by_user
         return tmp

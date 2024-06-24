@@ -12,7 +12,7 @@ import { http, X_TOKEN } from 'libs';
 import styles from './index.module.less';
 import store from './store';
 
-function Ext1Console(props) {
+function Ext3Console(props) {
   const outputs = useLocalStore(() => ({}));
   const terms = useLocalStore(() => ({}));
   const [mini, setMini] = useState(false);
@@ -213,4 +213,4 @@ function Ext1Console(props) {
 
 }
 
-export default observer(Ext1Console)
+export default observer(Ext3Console)

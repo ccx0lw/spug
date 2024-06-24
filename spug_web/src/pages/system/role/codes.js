@@ -88,7 +88,7 @@ export default [{
     perms: [
       {key: 'view', label: '查看构建'},
       {key: 'add', label: '新建版本'},
-      {key: 'build', label: '执行构建'},
+      {key: 'build_image', label: '执行构建'},
       {key: 'del', label: '删除版本'},
     ]
   },{

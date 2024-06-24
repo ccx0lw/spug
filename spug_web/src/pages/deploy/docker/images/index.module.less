@@ -1,5 +1,57 @@
+.approve {
+  :global(.ant-switch) {
+    background: #faad14;
+  }
+
+  :global(.ant-switch-checked) {
+    background: #389e0d;
+  }
+}
+
+.miniConsole {
+  position: fixed;
+  bottom: 12px;
+  right: 24px;
+  align-items: flex-end;
+  z-index: 999;
+
+  .item {
+    width: 180px;
+    box-shadow: 0 0 4px rgba(0, 0, 0, .3);
+    border-radius: 5px;
+
+    :global(.ant-progress-text) {
+      text-align: center;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      margin-bottom: 4px;
+
+      .title {
+        width: 120px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .icon {
+        font-size: 16px;
+        color: rgba(0, 0, 0, .45);
+      }
+
+      .icon:hover {
+        color: #000;
+      }
+    }
+  }
+}
+
 .console {
-  .fullscreen {
+  .miniIcon {
     position: absolute;
     top: 0;
     right: 0;
@@ -11,24 +63,71 @@
     cursor: pointer;
     color: rgba(0, 0, 0, .45);
     margin-right: 56px;
+
+    :hover {
+      color: #000;
+    }
   }
 
-  .fullscreen:hover {
-    color: #000;
-  }
+  .header {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 
-  .out {
-    margin-top: 24px;
-    padding: 8px 0 8px 15px;
-    border: 1px solid #d9d9d9;
-    border-radius: 4px;
-    background-color: #fafafa;
+    .title {
+      width: 200px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-weight: 600;
+    }
+
+    .step {
+      flex: 1;
+      margin-right: 16px;
+    }
+
+    .codeIcon {
+      font-size: 22px;
+      color: #1890ff;
+    }
   }
 }
 
-.split {
-  height: 1px;
-  background-color: #eee;
-  margin: 16px 0 24px 0;
-  clear: both
+.collapse {
+  :global(.ant-collapse-content-box) {
+    padding: 0;
+  }
+
+  :global(.ant-collapse-header-text) {
+    flex: 1
+  }
+}
+
+.upload {
+  :global(.ant-upload-btn) {
+    padding: 0 !important;
+  }
+}
+
+.uploadHide {
+  :global(.ant-upload-drag) {
+    display: none;
+  }
+  :global(.ant-upload-list-item) {
+    margin: 0;
+  }
+}
+
+.min120 {
+  min-width: 120px;
+}
+
+.min155 {
+  min-width: 155px;
+}
+
+.min180 {
+  min-width: 180px;
 }

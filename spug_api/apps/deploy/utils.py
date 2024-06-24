@@ -242,13 +242,13 @@ def _ext3_deploy(req, helper, env):
         build_repository(rep, helper)
         req.repository = rep
     else:
-        helper.send_info('local', f'\r\n \033[32m使用构建仓库\033[0m \r\n id:[{req.repository_id}] \r\n 环境:[{req.repository.env.name}] \r\n version:[{req.repository.version}] \r\n 创建时间:[{req.repository.created_at}] \r\n 创建人:[{req.repository.created_by.nickname}] \r\n \033[32m完成√\033[0m\r\n')
+        helper.send_info('local', f'\r\n \033[32m使用构建仓库\033[0m \r\n id:[{req.repository_id}] \r\n 环境:[{req.repository.env.name}] \r\n 版本:[{req.repository.version}] \r\n 创建时间:[{req.repository.created_at}] \r\n 创建人:[{req.repository.created_by.nickname}] \r\n 备注:[{req.repository.remarks}] \r\n \033[32m完成√\033[0m\r\n')
     extras = json.loads(req.extra)
     if extras[0] == 'repository':
         extras = extras[1:]
     if extras[0] == 'branch':
         env.update(SPUG_GIT_BRANCH=extras[1], SPUG_GIT_COMMIT_ID=extras[2])
-    if extras[0] == 'image':
+    if extras[0] == 'docker_image':
         extras = extras[1:]
     else:
         env.update(SPUG_GIT_TAG=extras[1])
@@ -280,13 +280,16 @@ def _ext3_deploy(req, helper, env):
             version=req.version,
             spug_version=req.spug_version,
             extra=req.extra,
-            remarks='SPUG AUTO MAKE BY IMAGE BUILD',
+            remarks='SPUG AUTO MAKE',
             created_by_id=req.created_by_id,
             repository=req.repository
         )
         new_env = AttrDict(env.items())
         build_docker_image(rep, helper, new_env)
         req.docker_image = rep
+    else:
+        helper.send_info('image', f'\r\n \033[32m使用镜像仓库\033[0m \r\n id:[{req.docker_image_id}] \r\n 环境:[{req.docker_image.env.name}] \r\n 版本:[{req.docker_image.version}] \r\n 镜像URL:[{req.docker_image.url}] \r\n 创建时间:[{req.docker_image.created_at}] \r\n 创建人:[{req.docker_image.created_by.nickname}] \r\n 备注:[{req.docker_image.remarks}] \r\n \033[32m完成√\033[0m\r\n')
+        
     # 添加yaml变量
     if extend.yaml_params:
         yaml_params = json.loads(extend.yaml_params)
@@ -445,7 +448,7 @@ def _deploy_ext3_host(req, helper, h_id, env):
     with host.get_ssh(default_env=env) as ssh:
         base_dst_dir = os.path.dirname(extend.dst_dir)
         code, _ = ssh.exec_command_raw(
-            f'mkdir -p {extend.dst_repo}/{req.spug_version} {base_dst_dir} && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
+            f'mkdir -p {extend.dst_repo} {base_dst_dir}  && mkdir -p "{extend.dst_repo}/{req.spug_version}" && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
         if code == 0:
             helper.send_error(host.id, f'检测到该主机的发布目录 {extend.dst_dir!r} 已存在，为了数据安全请自行备份后删除该目录，Spug 将会创建并接管该目录。')
         if req.type == '2':

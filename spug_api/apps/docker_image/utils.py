@@ -30,7 +30,7 @@ def dispatch(rep: DockerImage, helper=None, env=None):
     try:
         api_token = uuid.uuid4().hex
         helper.rds.setex(api_token, 60 * 60, f'{rep.app_id},{rep.env_id}')
-        helper.send_info('image', f'\033[32m完成√\033[0m\r\n{human_time()} 编译准备...        ')
+        helper.send_info('image', f'\r\n{human_time()} 编译准备...        ')
         
         # 通过容器镜像界面直接构建，不带环境
         if env is None:
@@ -158,7 +158,7 @@ def _build(rep: DockerImage, helper, env, image_url):
     with host.get_ssh(default_env=env) as ssh:
         base_dst_dir = os.path.dirname(extend.dst_dir)
         code, _ = ssh.exec_command_raw(
-            f'mkdir -p {extend.dst_repo}/{rep.spug_version} {base_dst_dir} && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
+            f'mkdir -p {extend.dst_repo} {base_dst_dir} && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
         if code == 0:
             helper.send_error('image', f'检测到该主机的编译目录 {extend.dst_dir!r} 已存在，为了数据安全请自行备份后删除该目录，Spug 将会创建并接管该目录。')
         # clean
@@ -180,23 +180,30 @@ def _build(rep: DockerImage, helper, env, image_url):
         command = f'cd {extend.dst_repo} && rm -rf {rep.spug_version} && tar xf {tar_gz_file} && rm -f {rep.deploy_id}_*.tar.gz'
         helper.remote_raw('image', ssh, command)
         helper.send_step('image', 1, '\033[32m完成√\033[0m\r\n')
-            
+        
         # 查询dockerfile模板文件，有则写入
         template = FileTemplate.objects.filter(env_id=rep.env_id, type='dockerfile').first()
         if template is not None:
             helper.send_step('image', 1, f'{human_time()} 写入 {template.name} 文件       ')
             helper.remote_raw('image', ssh, f'cd {extend.dst_repo} && {clean_command}')
-            helper.send_step('image', 1, f'{os.path.join(BUILD_DIR, template.name)}')
+            template_file_path = os.path.join(BUILD_DIR, rep.spug_version, template.name)
+            helper.send_step('image', 1, f'本地 : {template_file_path}')
+            helper.send_step('image', 1, f'远程 : {os.path.join(extend.dst_repo, rep.spug_version, template.name)}')
             try:
-                with open(os.path.join(BUILD_DIR, template.name), 'w', encoding='utf-8') as file:
-                    file.write(template.body)
+                os.makedirs(os.path.dirname(template_file_path), exist_ok=True)
                 
-                callback = helper.progress_callback('image')
-                ssh.put_file(
-                    os.path.join(BUILD_DIR, template.name),
-                    os.path.join(extend.dst_repo, rep.spug_version, template.name),
-                    callback
-                )
+                with open(template_file_path, 'w', encoding='utf-8') as file:
+                    file.write(template.body)
+                    
+                if os.path.exists(template_file_path) and os.path.getsize(template_file_path) > 0:
+                    callback = helper.progress_callback('image')
+                    ssh.put_file(
+                        template_file_path,
+                        os.path.join(extend.dst_repo, rep.spug_version, template.name),
+                        callback
+                    )
+                else:
+                    raise Exception(template.name + " 模板文件写入失败或文件为空")
             except Exception as e:
                 helper.send_error('image', f'Exception: {e}')
         else:

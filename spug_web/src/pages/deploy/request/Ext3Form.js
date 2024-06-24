@@ -11,7 +11,7 @@ import HostSelector from './HostSelector';
 import { http, history, includes } from 'libs';
 import store from './store';
 import lds from 'lodash';
-import moment, { max } from 'moment';
+import moment from 'moment';
 import hostStore from 'pages/host/store';
 import tagStore from 'pages/config/tag/store';
 
@@ -33,6 +33,7 @@ export default observer(function () {
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [repositories, setRepositories] = useState([]);
+  const [images, setImages] = useState([]);
   const [host_ids, setHostIds] = useState([]);
   const [plan, setPlan] = useState(store.record.plan);
   const [fetching, setFetching] = useState(false);
@@ -56,20 +57,23 @@ export default observer(function () {
     const deploy_id = store.record.deploy_id
     const p1 = http.get(`/api/app/deploy/${deploy_id}/versions/`, {timeout: 300000})
     const p2 = http.get('/api/repository/', {params: {deploy_id}})
-
+    const p4 = http.get('/api/docker_image/', {params: {deploy_id}})
     // 获取deploy的环境信息，用于判断是否是生产环境，是否是镜像编译、后台发布
     const p3 = http.get(`/api/app/deploy/${deploy_id}/info/`, {timeout: 300000})
 
-    Promise.all([p1, p2, p3, hostStore.initial()])
-      .then(([res1, res2, res3]) => {
-        if (!versions.branches) _initial(res1, res2, res3)
+    Promise.all([p1, p2, p3, p4, hostStore.initial()])
+      .then(([res1, res2, res3, res4]) => {
         setVersions(res1)
         setEnv(res3)
         var tmp = res2
+        var tmp2 = res4
         if (res3?.env_prod) {
           tmp = res2.filter(item => item?.extra?.length > 0 && item?.extra[0] == 'tag')
+          tmp2 = res4.filter(item => item?.extra?.length > 0 && (item?.extra[0] == 'tag' || (item?.extra[0] == 'repository') && item?.extra[1] == 'tag'))
         }
+        if (!versions.branches) _initial(res1, tmp, res3, tmp2)
         setRepositories(tmp)
+        setImages(tmp2)
       })
       .finally(() => setFetching(false))
   }
@@ -94,10 +98,11 @@ export default observer(function () {
       }, () => setLoading(false))
   }
 
-  function _setDefault(type, new_extra, new_versions, new_repositories) {
+  function _setDefault(type, new_extra, new_versions, new_repositories, new_images) {
     const now_extra = new_extra || extra;
     const now_versions = new_versions || versions;
     const now_repositories = new_repositories || repositories;
+    const now_images = new_images || images;
     const {branches, tags} = now_versions;
     if (type === 'branch') {
       let [branch, commit] = [now_extra[1], null];
@@ -112,13 +117,16 @@ export default observer(function () {
     } else if (type === 'tag') {
       setExtra1(lds.get(Object.keys(tags), 0))
       setExtra2(null)
+    } else if (type === 'docker_image') {
+      setExtra1(lds.get(now_images, '0.id'))
+      setExtra2(null)
     } else {
       setExtra1(lds.get(now_repositories, '0.id'))
       setExtra2(null)
     }
   }
 
-  function _initial(versions, repositories, env) {
+  function _initial(versions, repositories, env, images) {
     if (env.env_prod) {
       return _setDefault('tags', null, null, null)
     }
@@ -130,7 +138,7 @@ export default observer(function () {
           const type = item.extra[0];
           setExtra(item.extra);
           setGitType(type);
-          return _setDefault(type, item.extra, versions, repositories);
+          return _setDefault(type, item.extra, versions, repositories, images);
         }
       }
       setGitType('branch');
@@ -188,7 +196,7 @@ export default observer(function () {
                 <Select.Option value="branch" disabled={env.env_prod}>Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
                 <Select.Option value="repository">构建仓库</Select.Option>
-                <Select.Option value="image">镜像</Select.Option>
+                <Select.Option value="docker_image">镜像</Select.Option>
               </Select>
               <Select
                 showSearch
@@ -226,7 +234,14 @@ export default observer(function () {
                     </Select.Option>
                   ))
                 ) : (
-                  <Select.Option value="1">镜像</Select.Option>
+                  images.map(item => (
+                    <Select.Option key={item.id} value={item.id} content={item.version}>
+                      <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                        <span>{item.version}</span>
+                        <span style={{color: '#999', fontSize: 12}}>构建于 {moment(item.created_at).fromNow()}</span>
+                      </div>
+                    </Select.Option>
+                  ))
                 )
               }
               </Select>

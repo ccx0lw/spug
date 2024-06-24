@@ -20,6 +20,8 @@ class ComConsumer(BaseConsumer):
         module = self.scope['url_route']['kwargs']['module']
         if module == 'build':
             self.key = f'{settings.BUILD_KEY}:{token}'
+        elif module == 'build_image':
+            self.key = f'{settings.BUILD_IMAGE_KEY}:{token}'
         elif module == 'request':
             self.key = f'{settings.REQUEST_KEY}:{token}'
         elif module == 'host':

@@ -10,6 +10,7 @@ from apps.docker_image.models import DockerImage
 from apps.deploy.models import DeployRequest
 from apps.docker_image.utils import dispatch
 from apps.app.models import Deploy
+from apps.repository.models import Repository
 from threading import Thread
 import json
 
@@ -23,6 +24,7 @@ class DockerImageView(View):
             app_name=F('app__name'),
             app_rel_tags=F('app__rel_tags'),
             env_name=F('env__name'),
+            env_prod=F('env__prod'),
             created_by_user=F('created_by__nickname'))
         if deploy_id:
             data = data.filter(deploy_id=deploy_id, status='5')
@@ -62,6 +64,14 @@ class DockerImageView(View):
                 if not form.extra[2]:
                     return json_response(error='请选择要发布的分支及Commit ID')
                 form.version = f'{form.extra[1]}#{form.extra[2][:6]}'
+            elif form.extra[0] == 'repository':
+                if not form.extra[1]:
+                    return json_response(error='请选择要发布的版本')
+                repository = Repository.objects.get(pk=form.extra[1])
+                form.repository_id = repository.id
+                form.version = repository.version
+                form.spug_version = repository.spug_version
+                form.extra = ['repository'] + json.loads(repository.extra)
             else:
                 return json_response(error='参数错误')
 
@@ -73,8 +83,10 @@ class DockerImageView(View):
                 else:
                     return json_response(error='生产环境只能选择tag代码')
                 
+            if form.extra[0] != 'repository':
+                form.spug_version = DockerImage.make_spug_version(deploy.id)
+                
             form.extra = json.dumps(form.extra)
-            form.spug_version = DockerImage.make_spug_version(deploy.id)
             
             rep = DockerImage.objects.create(
                 app_id=deploy.app_id,
@@ -118,11 +130,11 @@ class DockerImageView(View):
 @auth('deploy.docker_image.view')
 def get_requests(request):
     form, error = JsonParser(
-        Argument('repository_id', type=int, help='参数错误')
+        Argument('docker_image_id', type=int, help='参数错误')
     ).parse(request.GET)
     if error is None:
         requests = []
-        for item in DeployRequest.objects.filter(repository_id=form.repository_id):
+        for item in DeployRequest.objects.filter(docker_image_id=form.docker_image_id):
             data = item.to_dict(selects=('id', 'name', 'created_at'))
             data['host_ids'] = json.loads(item.host_ids)
             data['status_alias'] = item.get_status_display()
@@ -137,7 +149,7 @@ def get_detail(request, r_id):
         return json_response(error='未找到指定构建记录')
     rds, counter = get_redis_connection(), 0
     if docker_image.remarks == 'SPUG AUTO MAKE':
-        req = docker_image.deployrequest_set.filter(repository_id=docker_image.id, spug_version=docker_image.spug_version).last()
+        req = docker_image.deployrequest_set.filter(docker_image_id=docker_image.id, spug_version=docker_image.spug_version).last()
         if req is not None:
             key = f'{settings.REQUEST_KEY}:{req.id}'
         else:
