@@ -75,7 +75,7 @@ export default function () {
           const key = `open${Date.now()}`;
           const description = <div style={{whiteSpace: 'pre-wrap'}}>{content}</div>;
           const btn = <Button type="primary" size="small" onClick={() => notification.close(key)}>知道了</Button>;
-          notification.warning({message: title, description, btn, key, top: 64, duration: null})
+          notification.warning({message: title, description, btn, key, top: 64, duration: 3})
         } catch (e) {
 
         }

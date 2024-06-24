@@ -97,7 +97,7 @@ class DockerImageView(View):
             return json_response(rep.to_view())
         return json_response(error=error)
 
-    @auth('deploy.docker_image.add|deploy.docker_image.build')
+    @auth('deploy.docker_image.add|deploy.docker_image.build_image')
     def patch(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='参数错误'),
