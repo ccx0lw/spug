@@ -1,4 +1,6 @@
-<h1 align="center">Spug</h1>
+<h1 align="center">Spug X</h1>
+基于SPUG 3.0自定义开发增加一些功能
+
 
 ## 自定义开发
 增加容器发布方式，支持docker/k8s发布。
