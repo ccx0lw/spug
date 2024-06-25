@@ -20,6 +20,8 @@
 ### 标签管理
 ![image](https://github.com/ccx0lw/spug/assets/20969915/ebe9e2a6-db30-4f58-b862-4a88e9a90140)
 ![image](https://github.com/ccx0lw/spug/assets/20969915/a551258f-3959-4760-aaae-ee8d49773a81)
+![image](https://github.com/ccx0lw/spug/assets/20969915/cfa45dc4-e276-404f-a2ce-d2529832d47d)
+
 ### 环境配置
 ![image](https://github.com/ccx0lw/spug/assets/20969915/830156f3-535a-40d7-b8b7-8f8715e08454)
 ![image](https://github.com/ccx0lw/spug/assets/20969915/10143018-298e-433b-894d-82f67ac8b68f)
