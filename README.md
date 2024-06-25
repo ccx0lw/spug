@@ -1,126 +1,5 @@
 <h1 align="center">Spug</h1>
 
-<div align="center">
-
-Spug是面向中小型企业设计的轻量级无Agent的自动化运维平台，整合了主机管理、主机批量执行、主机在线终端、应用发布部署、在线任务计划、配置中心、监控、报警等一系列功能。
-
-</div>
-
-- 官网地址：https://spug.cc
-- 使用文档：https://spug.cc/docs/about-spug/
-- 更新日志：https://spug.cc/docs/change-log/
-- 常见问题：https://spug.cc/docs/faq/
-- 推送助手：https://push.spug.cc
-
-## 演示环境
-
-演示地址：https://demo.spug.cc
-
-## 🔐免费通配符SSL证书
-免费通配符，付费证书价格亲民，性价比超高，低于市场其他平台价格，免费专家一对一配置服务，购买流程简单快速，且支持7天无理由退款和开具发票。提供一键下载和SSL过期通知配置，免费申请：[https://ssl.spug.cc](https://ssl.spug.cc)
-
-
-## 🔥推送助手
-
-推送助手是一个集成了电话、短信、邮件、飞书、钉钉、微信、企业微信等多通道的消息推送平台，可以3分钟实现Zabbix、Prometheus、夜莺等监控系统的电话短信报警，点击体验：[https://push.spug.cc](https://push.spug.cc)
-
-
-## 特性
-
-- **批量执行**: 主机命令在线批量执行
-- **在线终端**: 主机支持浏览器在线终端登录
-- **文件管理**: 主机文件在线上传下载
-- **任务计划**: 灵活的在线任务计划
-- **发布部署**: 支持自定义发布部署流程
-- **配置中心**: 支持KV、文本、json等格式的配置
-- **监控中心**: 支持站点、端口、进程、自定义等监控
-- **报警中心**: 支持短信、邮件、钉钉、微信等报警方式
-- **优雅美观**: 基于 Ant Design 的UI界面
-- **开源免费**: 前后端代码完全开源
-
-
-## 环境
-
-* Python 3.6+
-* Django 2.2
-* Node 12.14
-* React 16.11
-
-## 安装
-
-[官方文档](https://spug.cc/docs/install-docker)
-
-更多使用帮助请参考： [使用文档](https://spug.cc/docs/host-manage/)
-
-
-## 推荐项目
-[Yearning — MYSQL 开源SQL语句审核平台](https://github.com/cookieY/Yearning)
-
-
-## 预览
-
-### 主机管理
-![image](https://cdn.spug.cc/img/3.0/host.jpg)
-
-#### 主机在线终端
-![image](https://cdn.spug.cc/img/3.0/web-terminal.jpg)
-
-#### 文件在线上传下载
-![image](https://cdn.spug.cc/img/3.0/file-manager.jpg)
-
-#### 主机批量执行
-![image](https://cdn.spug.cc/img/3.0/host-exec.jpg)
-![image](https://cdn.spug.cc/img/3.0/host-exec2.jpg)
-
-#### 应用发布
-![image](https://cdn.spug.cc/img/3.0/deploy.jpg)
-
-#### 监控报警
-![image](https://cdn.spug.cc/img/3.0/monitor.jpg)
-
-#### 角色权限
-![image](https://cdn.spug.cc/img/3.0/user-role.jpg)
-
-
-## 赞助
-<table>
-  <thead>
-    <tr>
-      <th align="center" style="width: 115px;">
-        <a href="https://www.ucloud.cn/site/active/kuaijie.html?invitation_code=C1xD0E5678FBA77">
-          <img src="https://cdn.spug.cc/img/ucloud.png" width="115px"><br>
-          <sub>UCloud</sub><br>
-          <sub>5 元/月云主机</sub>
-        </a>
-      </th>
-        <th align="center" style="width: 115px;">
-        <a href="https://www.aliyun.com/minisite/goods?userCode=bkj6b9tn">
-          <img src="https://cdn.spug.cc/img/aliyun-logo.png" width="115px"><br>
-          <sub>阿里云</sub><br>
-          <sub>2核心2G低至99元/年</sub>
-        </a>
-      </th>
-      <th align="center" style="width: 125px;">
-        <a href="http://www.magedu.com">
-          <img src="https://cdn.spug.cc/img/magedu-logo.jpeg" width="115px"><br>
-          <sub>马哥教育</sub><br>
-          <sub>IT人高薪职业学院</sub>
-        </a>
-      </th>
-    </tr>
-  </thead>
-</table>
-
-## 开发者群
-#### 关注Spug运维公众号加微信群、QQ群、获取最新产品动态
-<div >
-   <img src="https://cdn.spug.cc/img/spug-club.jpg" width = "300" height = "300" alt="spug-qq" align=center />
-<div>
-  
-## License & Copyright
-[AGPL-3.0](https://opensource.org/licenses/AGPL-3.0)
-
-
 ## 自定义开发
 增加容器发布方式，支持docker/k8s发布。
 优化界面、配置。给环境增加是否生产环境，如果是生产环境只能编译发布tag代码。
@@ -129,3 +8,30 @@ Spug是面向中小型企业设计的轻量级无Agent的自动化运维平台�
 - **模板管理**: Dockerfile 、 k8s yaml
 - **容器仓库**: docker容器仓库维护
 - **容器镜像**: 镜像管理
+
+### 容器发布
+![image](https://github.com/ccx0lw/spug/assets/20969915/6c98e6fb-cf9e-4f5e-a604-165283ecbb11)
+![image](https://github.com/ccx0lw/spug/assets/20969915/43b1ece6-b94a-4d1a-8d5e-dcc1cd5af1cb)
+![image](https://github.com/ccx0lw/spug/assets/20969915/2c54d89a-b268-4fdb-878e-f716ca8a1b80)
+![image](https://github.com/ccx0lw/spug/assets/20969915/4b9552f8-ed20-4855-8c56-6abeda528f7d)
+![image](https://github.com/ccx0lw/spug/assets/20969915/70b17beb-a6eb-4da8-bf62-ec03a0eb7bec)
+### 标签管理
+![image](https://github.com/ccx0lw/spug/assets/20969915/ebe9e2a6-db30-4f58-b862-4a88e9a90140)
+![image](https://github.com/ccx0lw/spug/assets/20969915/a551258f-3959-4760-aaae-ee8d49773a81)
+### 环境配置
+![image](https://github.com/ccx0lw/spug/assets/20969915/830156f3-535a-40d7-b8b7-8f8715e08454)
+![image](https://github.com/ccx0lw/spug/assets/20969915/10143018-298e-433b-894d-82f67ac8b68f)
+### 模板管理
+![image](https://github.com/ccx0lw/spug/assets/20969915/e2b4912e-1d7b-44d8-a2e1-bb86a8890299)
+![image](https://github.com/ccx0lw/spug/assets/20969915/302d549d-c8d6-443d-90d3-7d89c1ff9a2a)
+### 容器仓库
+![image](https://github.com/ccx0lw/spug/assets/20969915/9609c317-b2f2-4ab0-b726-4b9ec7711602)
+### 容器镜像
+![image](https://github.com/ccx0lw/spug/assets/20969915/799f3b8d-38eb-49b3-ac6c-bb8473c365cc)
+![image](https://github.com/ccx0lw/spug/assets/20969915/a95ad161-a555-4a3d-9dd3-faa973471443)
+
+
+### 发布申请
+![image](https://github.com/ccx0lw/spug/assets/20969915/439c43a4-787a-429d-a476-abbd4a687966)
+![image](https://github.com/ccx0lw/spug/assets/20969915/bb4d64ca-a0f4-4e65-b354-8e2fc73f802b)
+![image](https://github.com/ccx0lw/spug/assets/20969915/090b65a9-1e44-4a7c-b6c4-af75aea82039)
