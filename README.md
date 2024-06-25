@@ -29,6 +29,7 @@
 ### 容器镜像
 ![image](https://github.com/ccx0lw/spug/assets/20969915/799f3b8d-38eb-49b3-ac6c-bb8473c365cc)
 ![image](https://github.com/ccx0lw/spug/assets/20969915/a95ad161-a555-4a3d-9dd3-faa973471443)
+![image](https://github.com/ccx0lw/spug/assets/20969915/573e5b2a-46bc-4803-a50b-4276d6bc051c)
 
 
 ### 发布申请
