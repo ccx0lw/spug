@@ -401,7 +401,10 @@ def post_request_ext3(request):
                 if (form.extra[1] != 'tag'):
                     return json_response(error='生产环境只能选择tag代码')
             elif (form.extra[0] == 'docker_image'):
-                if (form.extra[1] != 'tag'):
+                if (form.extra[1] == 'repository'):
+                    if (form.extra[2] != 'tag'):
+                        return json_response(error='生产环境只能选择tag代码')
+                elif (form.extra[1] != 'tag'):
                     return json_response(error='生产环境只能选择tag代码')
             else:
                 return json_response(error='生产环境只能选择tag代码')

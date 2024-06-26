@@ -32,7 +32,7 @@ export default observer(function () {
       <Breadcrumb>
         <Breadcrumb.Item>首页</Breadcrumb.Item>
         <Breadcrumb.Item>应用发布</Breadcrumb.Item>
-        <Breadcrumb.Item>镜像仓库</Breadcrumb.Item>
+        <Breadcrumb.Item>容器镜像</Breadcrumb.Item>
       </Breadcrumb>
       <SearchForm>
         <SearchForm.Item span={7} title="标签">

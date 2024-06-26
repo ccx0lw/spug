@@ -81,6 +81,26 @@ def human_seconds_time(seconds):
 def render_str(template, datasheet):
     return Template(template).safe_substitute(datasheet)
 
+class EnhancedTemplate(Template):
+    def safe_substitute_or_empty(self, mapping={}, /, **kws):
+        # 自定义的替换逻辑
+        # 如果变量在 mapping 中没有对应的值，则替换为空字符串
+        def replacement(match):
+            # 获取变量名
+            name = match.group('named') or match.group('braced')
+            if name is not None:
+                # 返回 mapping 中的值，如果不存在则返回空字符串
+                return mapping.get(name, kws.get(name, ''))
+            if match.group('escaped') is not None:
+                return self.delimiter
+            if match.group('invalid') is not None:
+                self._invalid(match)
+            raise ValueError('Unrecognized named group in pattern', self.pattern)
+
+        return self.pattern.sub(replacement, self.template)
+
+def render_str_or_empty(template, datasheet):
+    return EnhancedTemplate(template).safe_substitute_or_empty(datasheet)
 
 def json_response(data='', error=''):
     content = AttrDict(data=data, error=error)

@@ -20,7 +20,32 @@ export default function Parameter(props) {
     if (formData.type === 'select' && !formData.options) return message.error('请输入可选项')
     const tmp = lds.find(props.parameters, {variable: formData.variable})
     if (tmp && tmp.id !== formData.id) return message.error('变量名重复')
-    props.onOk(formData)
+
+    form.validateFields().then(values => {
+      // 自定义验证逻辑
+      const variableRegex = /^[A-Z0-9_]+$/;
+      const spugRegex = /^(?!_?SPUG_?).*/;
+  
+      if (!variableRegex.test(values.variable)) {
+        return message.error('变量名只能包含大写字母、数字和下划线');
+      }
+      if (!spugRegex.test(values.variable)) {
+        return message.error('变量名不能以SPUG或_SPUG_开头');
+      }
+  
+      // 如果通过验证，继续处理表单数据
+      values.id = props.parameter.id;
+      const tmp = lds.find(props.parameters, { variable: values.variable });
+      if (tmp && tmp.id !== values.id) {
+        return message.error('变量名重复');
+      }
+  
+      // 如果一切正常，调用 onOk 传递表单数据
+      props.onOk(values);
+    }).catch(errorInfo => {
+      // 处理验证失败的情况
+      console.log('验证失败:', errorInfo);
+    });
   }
 
   return (
@@ -36,7 +61,12 @@ export default function Parameter(props) {
           <Input placeholder="请输入参数名称"/>
         </Form.Item>
         <Form.Item required name="variable" label="变量名"
-                   tooltip="在脚本使用的变量名称">
+                   tooltip="在脚本使用的变量名称"
+                   rules={[
+                    { required: true, message: '请输入变量名' },
+                    { pattern: /^[A-Z0-9_]+$/, message: '变量名只能包含大写字母、数字和下划线' },
+                    { pattern: /^(?!_?SPUG_?).*/, message: '变量名不能以SPUG或_SPUG_开头' },
+                  ]}>
           <Input placeholder="请输入变量名"/>
         </Form.Item>
         <Form.Item required name="type" label="参数类型" tooltip="不同类型展示的形式不同。">

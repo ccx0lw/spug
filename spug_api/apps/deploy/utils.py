@@ -2,12 +2,13 @@
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
 from django_redis import get_redis_connection
+from django.core.exceptions import MultipleObjectsReturned
 from django.conf import settings
 from django.db import close_old_connections
-from libs.utils import AttrDict, human_time, render_str
+from libs.utils import AttrDict, human_time, render_str, render_str_or_empty
 from apps.host.models import Host
 from apps.config.utils import compose_configs
-from apps.config.models import FileTemplate
+from apps.config.models import ContainerRepository, FileTemplate
 from apps.repository.models import Repository
 from apps.repository.utils import dispatch as build_repository
 from apps.deploy.models import DeployRequest
@@ -250,18 +251,39 @@ def _ext3_deploy(req, helper, env):
         env.update(SPUG_GIT_BRANCH=extras[1], SPUG_GIT_COMMIT_ID=extras[2])
     if extras[0] == 'docker_image':
         extras = extras[1:]
+        # 设置变量
+        if extras[0] == 'repository':
+                extras = extras[1:]
+        if extras[0] == 'branch':
+            env.update(SPUG_GIT_BRANCH=extras[1], SPUG_GIT_COMMIT_ID=extras[2])
+        else:
+            env.update(SPUG_GIT_TAG=extras[1])
     else:
         env.update(SPUG_GIT_TAG=extras[1])
         
     extend = req.deploy.extend_obj
     
-    image_version = render_str(extend.image_version, env)
+    image_version = render_str_or_empty(extend.image_version, env)
     # 编译镜像的环境变量
     env.update(SPUG_IMAGE_NAME=extend.image_name)
     env.update(SPUG_IMAGE_VERSION=image_version)
-    # TODO 查询镜像的仓库
-    env.update(SPUG_CONTAINER_REPOSITORY='')
-    env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX='')
+    # 查询镜像的仓库
+    try:
+        container = ContainerRepository.objects.get(env_id=req.deploy.env_id)
+    except ContainerRepository.DoesNotExist:
+        container = None  # 或者你可以处理不存在的情况
+        helper.send_info('image', f'\r\n{human_time()} \033[31m[{req.deploy.env_id}]镜像的仓库配置不存在\033[0m{req.deploy.env.env_name}        ')
+    except MultipleObjectsReturned:
+        # 处理存在多个对象的情况
+        helper.send_error('image', f'\033[31m异常x\033[0m\r\n{human_time()} \033[31m镜像仓库配置，存在多条匹配的数据...\033[0m        ')
+        raise Exception("镜像仓库配置，存在多条匹配的数据")
+    
+    if container:
+        env.update(SPUG_CONTAINER_REPOSITORY=container.repository)
+        env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX=container.repository_name_prefix)
+    else:
+        env.update(SPUG_CONTAINER_REPOSITORY='')
+        env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX='')
     
     # 添加Dockerfile变量
     if extend.dockerfile_params:
@@ -297,7 +319,7 @@ def _ext3_deploy(req, helper, env):
             for d in yaml_params:
                 for key, value in d.items():
                     env[key]=value
-        
+                    
     if req.deploy.is_parallel:
         threads, latest_exception = [], None
         max_workers = max(10, os.cpu_count() * 5)
@@ -441,6 +463,24 @@ def _deploy_ext3_host(req, helper, h_id, env):
     if not host:
         helper.send_error(h_id, 'no such host')
     env.update({'SPUG_HOST_ID': h_id, 'SPUG_HOST_NAME': host.hostname})
+    
+    # 验证镜像和镜像仓库的URL是否一致（选择镜像发布的时候验证）
+    image_url = None
+    if env.SPUG_CONTAINER_REPOSITORY is not None:
+        image_url = "{}/{}{}{}:{}".format(
+                        env.SPUG_CONTAINER_REPOSITORY,
+                        env.SPUG_CONTAINER_REPOSITORY_NAME_PREFIX,
+                        "/" if env.SPUG_CONTAINER_REPOSITORY_NAME_PREFIX else "",
+                        env.SPUG_IMAGE_NAME,
+                        env.SPUG_IMAGE_VERSION
+                    )
+    else:
+        image_url = f'{env.SPUG_IMAGE_NAME}:{env.SPUG_IMAGE_VERSION}'
+    
+    diurl = req.docker_image.url
+    if image_url != diurl:
+        helper.send_error(host.id, f'\r\n镜像URL: {diurl} 跟系统配置的不一致 {image_url}！       \033[31m失败x\033[0m\r\n')
+    
     extend = req.deploy.extend_obj
     extend.dst_dir = render_str(extend.dst_dir, env)
     extend.dst_repo = render_str(extend.dst_repo, env)
@@ -449,6 +489,10 @@ def _deploy_ext3_host(req, helper, h_id, env):
         base_dst_dir = os.path.dirname(extend.dst_dir)
         code, _ = ssh.exec_command_raw(
             f'mkdir -p {extend.dst_repo} {base_dst_dir}  && mkdir -p "{extend.dst_repo}/{req.spug_version}" && [ -e {extend.dst_dir} ] && [ ! -L {extend.dst_dir} ]')
+        
+        if _:
+            helper.send_error(host.id, f'\r\n在【{host.name}】创建目录{extend.dst_repo}失败，原因:{_} \r\n')
+        
         if code == 0:
             helper.send_error(host.id, f'检测到该主机的发布目录 {extend.dst_dir!r} 已存在，为了数据安全请自行备份后删除该目录，Spug 将会创建并接管该目录。')
         if req.type == '2':
@@ -461,7 +505,6 @@ def _deploy_ext3_host(req, helper, h_id, env):
             template = FileTemplate.objects.filter(env_id=req.deploy.env_id, type='yaml').first()
             if template is not None:
                 helper.send_step(host.id, 1, f'{human_time()} 写入 {template.name} 文件       ')
-                helper.remote_raw(host.id, ssh, f'cd {extend.dst_repo} && {clean_command}')
                 helper.send_step(host.id, 1, f'{os.path.join(BUILD_DIR, template.name)}')
                 try:
                     with open(os.path.join(BUILD_DIR, template.name), 'w', encoding='utf-8') as file:

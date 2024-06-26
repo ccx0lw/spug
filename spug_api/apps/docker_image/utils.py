@@ -4,7 +4,7 @@
 from django_redis import get_redis_connection
 from django.conf import settings
 from django.core.exceptions import MultipleObjectsReturned
-from libs.utils import AttrDict, human_time, render_str
+from libs.utils import AttrDict, human_time, render_str, render_str_or_empty
 from apps.docker_image.models import DockerImage
 from apps.config.utils import compose_configs
 from apps.deploy.helper import Helper
@@ -73,13 +73,18 @@ def dispatch(rep: DockerImage, helper=None, env=None):
             
             # 查询
             extend = rep.deploy.extend_obj
-            image_version = render_str(extend.image_version, env)
+            image_version = render_str_or_empty(extend.image_version, env)
             # 编译镜像的环境变量
             env.update(SPUG_IMAGE_NAME=extend.image_name)
             env.update(SPUG_IMAGE_VERSION=image_version)
-            # TODO 查询镜像的仓库
-            env.update(SPUG_CONTAINER_REPOSITORY='')
-            env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX='')
+            # 查询镜像的仓库
+            containerRepository = ContainerRepository.objects.filter(env_id=rep.env_id).first()
+            if containerRepository:
+                env.update(SPUG_CONTAINER_REPOSITORY=containerRepository.repository)
+                env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX=containerRepository.repository_name_prefix)
+            else:
+                env.update(SPUG_CONTAINER_REPOSITORY='')
+                env.update(SPUG_CONTAINER_REPOSITORY_NAME_PREFIX='')
             # 添加Dockerfile变量
             if extend.dockerfile_params:
                 dockerfile_params = json.loads(extend.dockerfile_params)
@@ -91,7 +96,7 @@ def dispatch(rep: DockerImage, helper=None, env=None):
         # 查询镜像的仓库配置
         helper.send_info('image', f'\033[32m完成√\033[0m\r\n{human_time()} 查询{rep.env.name}[{rep.env_id}]镜像的仓库配置...        ')
         try:
-            container = ContainerRepository.objects.get(pk=rep.env_id)
+            container = ContainerRepository.objects.get(env_id=rep.env_id)
         except ContainerRepository.DoesNotExist:
             container = None  # 或者你可以处理不存在的情况
             helper.send_info('image', f'\033[32m完成√\033[0m\r\n{human_time()} \033[31m[{rep.env_id}]镜像的仓库配置不存在\033[0m{rep.env.name}        ')
@@ -110,7 +115,13 @@ def dispatch(rep: DockerImage, helper=None, env=None):
         # 镜像地址
         image_url = None
         if container is not None:
-            image_url = f'{container.repository}/{container.repository_name_prefix}/{env.SPUG_IMAGE_NAME}:{env.SPUG_IMAGE_VERSION}'
+            image_url = "{}/{}{}{}:{}".format(
+                        env.SPUG_CONTAINER_REPOSITORY,
+                        env.SPUG_CONTAINER_REPOSITORY_NAME_PREFIX,
+                        "/" if env.SPUG_CONTAINER_REPOSITORY_NAME_PREFIX else "",
+                        env.SPUG_IMAGE_NAME,
+                        env.SPUG_IMAGE_VERSION
+                    )
         else:
             image_url = f'{env.SPUG_IMAGE_NAME}:{env.SPUG_IMAGE_VERSION}'
         
@@ -119,11 +130,11 @@ def dispatch(rep: DockerImage, helper=None, env=None):
             helper.send_info('image', f'\r\n{human_time()} \033[31m镜像的版本是动态的{extend.image_version}  [{env.SPUG_IMAGE_VERSION}]\033[0m        ')
             if container is not None:
                 helper.send_info('image', f'\r\n{human_time()} \033[31m检查镜像仓库是否存在{env.SPUG_IMAGE_NAME}:{env.SPUG_IMAGE_VERSION}\033[0m        ')
-                # TODO 本地镜像仓库已经存在，则直接抛错终止【不允许覆盖】
+                # 本地镜像仓库已经存在，则直接抛错终止【不允许覆盖】
                 images = DockerImage.objects.filter(app_id=rep.app_id, env_id=rep.env_id, version=rep.version, status='5')
                 if images.exists():
-                    helper.send_info('image', f'\r\n{human_time()} \033[31m远程仓库已经存在对应版本的镜像，编译镜像终止。不允许覆盖镜像 {env.SPUG_IMAGE_NAME}:{env.SPUG_IMAGE_VERSION}。 发布后台服务可以选择当前已经编译上传过的镜像\033[0m        ')
-                    raise Exception("远程仓库已经存在对应版本的镜像，编译镜像终止。不允许覆盖镜像。 发布后台服务可以选择当前已经编译上传过的镜像")
+                    helper.send_info('image', f'\r\n{human_time()} \033[31m远程仓库已经存在对应版本的镜像，编译镜像终止。不允许覆盖镜像 {env.SPUG_IMAGE_NAME}:{env.SPUG_IMAGE_VERSION}。 发布后台服务可以选择当前已经编译上传过的镜像 或 将镜像版本固定不设置动态的\033[0m        ')
+                    raise Exception("远程仓库已经存在对应代码版本的镜像，编译镜像终止。不允许覆盖镜像。 发布后台服务可以选择当前已经编译上传过的镜像")
                 
         helper.send_info('image', f'\033[32m完成√\033[0m\r\n{human_time()} 开始编译镜像...        ')
     
@@ -185,10 +196,9 @@ def _build(rep: DockerImage, helper, env, image_url):
         template = FileTemplate.objects.filter(env_id=rep.env_id, type='dockerfile').first()
         if template is not None:
             helper.send_step('image', 1, f'{human_time()} 写入 {template.name} 文件       ')
-            helper.remote_raw('image', ssh, f'cd {extend.dst_repo} && {clean_command}')
             template_file_path = os.path.join(BUILD_DIR, rep.spug_version, template.name)
-            helper.send_step('image', 1, f'本地 : {template_file_path}')
-            helper.send_step('image', 1, f'远程 : {os.path.join(extend.dst_repo, rep.spug_version, template.name)}')
+            # helper.send_step('image', 1, f'本地 : {template_file_path}')
+            # helper.send_step('image', 1, f'远程 : {os.path.join(extend.dst_repo, rep.spug_version, template.name)}')
             try:
                 os.makedirs(os.path.dirname(template_file_path), exist_ok=True)
                 

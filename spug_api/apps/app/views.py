@@ -211,9 +211,6 @@ class DeployView(View):
                 extend_form.filter_rule = json.dumps(extend_form.filter_rule)
                 extend_form.dockerfile_params = json.dumps(extend_form.dockerfile_params)
                 extend_form.yaml_params = json.dumps(extend_form.yaml_params)
-                # TODO 检查对应环境是否维护了Dockerfile
-                
-                # TODO 检查对应环境是否维护了K8S yaml
                 
                 if form.id:
                     extend = DeployExtend3.objects.filter(deploy_id=form.id).first()

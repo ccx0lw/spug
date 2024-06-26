@@ -52,6 +52,17 @@ export default observer(function () {
     setAppTags(tagStore.records)
   }, [])
 
+  function uniqueByUrl(arr) { 
+    return arr.reduce((acc, current) => {
+      const x = acc.find(item => item.url === current.url);
+      if (!x) {
+        return acc.concat([current]);
+      } else {
+        return acc;
+      }
+    }, []);
+  };
+
   function fetchVersions() {
     setFetching(true);
     const deploy_id = store.record.deploy_id
@@ -73,7 +84,7 @@ export default observer(function () {
         }
         if (!versions.branches) _initial(res1, tmp, res3, tmp2)
         setRepositories(tmp)
-        setImages(tmp2)
+        setImages(uniqueByUrl(tmp2))
       })
       .finally(() => setFetching(false))
   }
@@ -161,6 +172,14 @@ export default observer(function () {
     }
   }
 
+  function extractImageDetails(fullString) {
+    // 使用 '/' 分割字符串以获取镜像名称和版本的部分
+    const parts = fullString.split('/');
+    // 获取最后一个部分，它包含镜像名称和版本
+    const imagePart = parts[parts.length - 1];
+    return imagePart;
+  }
+
   const {app_host_ids, type, rb_id} = store.record;
   const {branches, tags} = versions;
   return (
@@ -186,6 +205,7 @@ export default observer(function () {
           <Input placeholder="请输入申请标题"/>
         </Form.Item>
         <Form.Item required label="分支/标签/版本/镜像" style={{marginBottom: 12}} extra={<span>
+            {git_type === 'docker_image' ? <p>镜像只可以选择最近的3个, 如果镜像URL重复只会展示一个。 列表展示的是 [代码版本 镜像名称:镜像版本 镜像编译上传时间]</p> : null}
             根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"
                href="https://spug.cc/docs/use-problem#clone">clone 失败？</a>
@@ -233,16 +253,20 @@ export default observer(function () {
                       </div>
                     </Select.Option>
                   ))
-                ) : (
+                ) : git_type === 'docker_image' ? (
                   images.map(item => (
-                    <Select.Option key={item.id} value={item.id} content={item.version}>
+                    <Select.Option key={item.id} value={item.id} content={item.version} url={item.url}>
                       <div style={{display: 'flex', justifyContent: 'space-between'}}>
-                        <span>{item.version}</span>
-                        <span style={{color: '#999', fontSize: 12}}>构建于 {moment(item.created_at).fromNow()}</span>
+                        <span style={{
+                            width: 200,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}>{` ${item.version} ${extractImageDetails(item.url)}`}</span>
+                        <span style={{color: '#999', fontSize: 12}}>编译于 {moment(item.created_at).fromNow()}</span>
                       </div>
                     </Select.Option>
                   ))
-                )
+                ) : null
               }
               </Select>
             </Input.Group>
@@ -253,6 +277,16 @@ export default observer(function () {
             }
           </Form.Item>
         </Form.Item>
+        {git_type === 'docker_image' && (
+            <Form.Item label="镜像地址" tooltip=":后面的是版本号">
+              {images.map(item => 
+              item.id === extra1 && (
+                <div key={item.id}>
+                  <span>{item.url}</span>
+                </div>
+              ))}
+            </Form.Item>
+        )}
         {git_type === 'branch' && (
           <Form.Item required label="选择Commit ID">
             <Select value={extra2} placeholder="请选择" onChange={v => setExtra2(v)}>

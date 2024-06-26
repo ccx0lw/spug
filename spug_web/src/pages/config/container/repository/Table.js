@@ -5,8 +5,8 @@
  */
 import React from 'react';
 import { observer } from 'mobx-react';
-import { Table, Modal, message, Tag } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Table, Modal, message, Tag, Tooltip } from 'antd';
+import { PlusOutlined, QuestionOutlined } from '@ant-design/icons';
 import { Action, TableCard, AuthButton } from 'components';
 import { http, hasPermission } from 'libs';
 import store from './store';
@@ -63,8 +63,22 @@ class ComTable extends React.Component {
             {info.env_name}
           </div>
         )}/>
-        <Table.Column title="仓库地址" dataIndex="repository"/>
-        <Table.Column title="镜像前缀" dataIndex="repository_name_prefix"/>
+        <Table.Column title={
+          <span>
+            仓库地址
+            <Tooltip title="系统环境变量: SPUG_CONTAINER_REPOSITORY">
+              <QuestionOutlined/>
+            </Tooltip>
+          </span>
+        } dataIndex="repository"/>
+        <Table.Column title={
+          <span>
+            镜像前缀
+            <Tooltip title="系统环境变量: SPUG_CONTAINER_REPOSITORY_NAME_PREFIX">
+              <QuestionOutlined/>
+            </Tooltip>
+          </span>
+        } dataIndex="repository_name_prefix"/>
         <Table.Column ellipsis title="描述信息" dataIndex="desc"/>
         {hasPermission('config.container.repository.edit|config.container.repository.del|config.container.repository.view_config') && (
           <Table.Column width={210} title="操作" render={info => (

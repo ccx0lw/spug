@@ -11,6 +11,7 @@ from apps.deploy.models import DeployRequest
 from apps.docker_image.utils import dispatch
 from apps.app.models import Deploy
 from apps.repository.models import Repository
+from apps.config.models import ContainerRepository
 from threading import Thread
 import json
 
@@ -27,7 +28,18 @@ class DockerImageView(View):
             env_prod=F('env__prod'),
             created_by_user=F('created_by__nickname'))
         if deploy_id:
-            data = data.filter(deploy_id=deploy_id, status='5')
+            deploy = Deploy.objects.get(pk=deploy_id)
+            # 镜像只保留最后3条, 过滤掉和当前容器仓库配置不一致的
+            if deploy:
+                containerRepository = ContainerRepository.objects.filter(env_id=deploy.env_id).first()
+            if containerRepository:
+                url_prefix = containerRepository.repository + '/' + containerRepository.repository_name_prefix
+            else:
+                url_prefix = None
+            if url_prefix:
+                data = data.filter(deploy_id=deploy_id, status='5', url__startswith=url_prefix).order_by('-id')[:3]
+            else:
+                data = data.filter(deploy_id=deploy_id, status='5').order_by('-id')[:3]
             return json_response([x.to_view() for x in data])
 
         response = dict()

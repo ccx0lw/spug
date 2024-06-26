@@ -37,11 +37,24 @@ function ComTable() {
       .finally(() => setLoading(null))
   }
 
+  function extractImageDetails(fullString) {
+    // 使用 '/' 分割字符串以获取镜像名称和版本的部分
+    const parts = fullString.split('/');
+    // 获取最后一个部分，它包含镜像名称和版本
+    const imagePart = parts[parts.length - 1];
+    // 使用 ':' 分割以获取镜像名称和版本
+    const [imageName, imageVersion] = imagePart.split(':');
+    return { imageName, imageVersion };
+  }
+
   function expandedRowRender(record) {
     return (
       <Table rowKey="id" dataSource={record.child} pagination={false}>
-        <Table.Column title="版本" render={info => (
-          <div style={{color: '#1890ff', cursor: 'pointer'}} onClick={() => store.showDetail(info)}>{info.version}</div>
+        <Table.Column title={(<div><p>代码版本</p><p>镜像版本</p></div>)} render={info => (
+          <div onClick={() => store.showDetail(info)}>
+            <p style={{color: '#1890ff', cursor: 'pointer'}}>{info.version}</p>
+            <p>{info.status == '5' ? <Tag>{extractImageDetails(info.url)['imageVersion']}</Tag> : null}</p>
+          </div>
         )}/>
         <Table.Column title="环境" render={(info) => (
           <div>
@@ -74,7 +87,7 @@ function ComTable() {
     <TableCard
       tKey="dre"
       rowKey="id"
-      title="构建版本列表"
+      title="编译版本列表"
       loading={store.isFetching}
       dataSource={store.dataSource}
       onReload={store.fetchRecords}

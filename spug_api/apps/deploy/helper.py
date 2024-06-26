@@ -29,7 +29,6 @@ class Helper:
             while data:
                 for item in data:
                     counter += 1
-                    print(item)
                     tmp = json.loads(item.decode())
                     if tmp['key'] not in host_ids:
                         rds.rpush(tmp_key, item)

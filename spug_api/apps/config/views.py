@@ -423,6 +423,12 @@ class TagView(View):
             Tag.objects.filter(pk=form.id).delete()
         return json_response(error=error)
     
+    
+def clean_strip(parameters):
+    if isinstance(parameters, list):
+        return [{k.strip(): v.strip() if isinstance(v, str) else v for k, v in param.items()} for param in parameters]
+    return parameters
+    
 class FileTemplateView(View):
     @auth('file.template.view')
     def get(self, request):
@@ -456,7 +462,7 @@ class FileTemplateView(View):
             Argument('type', filter=lambda x: x in dict(FileTemplate.TYPES), help='请选择模版类型'),
             Argument('env_id', help='请选择环境'),
             Argument('body', help='请输入模版内容'),
-            Argument('parameters', type=list, handler=json.dumps, default=[]),
+            Argument('parameters', type=list, handler=lambda x: json.dumps(clean_strip(x)), default=[]),
             Argument('desc', required=False)
         ).parse(request.body)
         if error is None:
