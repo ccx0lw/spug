@@ -61,7 +61,10 @@ def dispatch(req, fail_mode=False):
         if req.deploy.extend == '1':
             _ext1_deploy(req, helper, env)
         elif req.deploy.extend == '3':
-            _ext3_deploy(req, helper, env)
+            if req.type == '0' :
+                _ext3_restart(req, helper, env)
+            else:
+                _ext3_deploy(req, helper, env)
         else:
             _ext2_deploy(req, helper, env)
         req.status = '3'
@@ -550,3 +553,47 @@ def _deploy_ext3_host(req, helper, h_id, env):
         helper.send_step(h_id, 100, f'\r\n{human_time()} ** \033[32m发布成功\033[0m **')
         
         ## 后续清理目录
+        
+        
+def _ext3_restart(req, helper, env):
+    extend = req.deploy.extend_obj
+    # 添加yaml变量
+    if extend.yaml_params:
+        yaml_params = json.loads(extend.yaml_params)
+        if yaml_params:
+            for d in yaml_params:
+                for key, value in d.items():
+                    env[key]=value
+                    
+    host_ids = sorted(req.host_ids, reverse=True)
+    while host_ids:
+        h_id = host_ids.pop()
+        new_env = AttrDict(env.items())
+        try:
+            _restart_ext3_host(req, helper, h_id, new_env)
+            req.fail_host_ids.remove(h_id)
+        except Exception as e:
+            helper.send_error(h_id, f'Exception: {e}', False)
+            for h_id in host_ids:
+                helper.send_error(h_id, '终止重启', False)
+            raise e
+        
+def _restart_ext3_host(req, helper, h_id, env):
+    helper.send_step(h_id, 1, f'\033[32m就绪√\033[0m\r\n{human_time()} 数据准备...        ')
+    host = Host.objects.filter(pk=h_id).first()
+    if not host:
+        helper.send_error(h_id, 'no such host')
+    env.update({'SPUG_HOST_ID': h_id, 'SPUG_HOST_NAME': host.hostname})
+    
+    extend = req.deploy.extend_obj
+    with host.get_ssh(default_env=env) as ssh:
+        helper.send_step(host.id, 1, '\033[32m完成√\033[0m\r\n')
+
+        if extend.hook_restart_host:
+            helper.send_step(h_id, 4, f'{human_time()} 执行重启...       \r\n')
+            command = f'{extend.hook_restart_host}'
+            helper.remote(host.id, ssh, command)
+        else:
+            helper.send_error(h_id, f'{human_time()} 未配置重启脚本...       \r\n')
+
+        helper.send_step(h_id, 100, f'\r\n{human_time()} ** \033[32m重启成功\033[0m **')

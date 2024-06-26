@@ -50,6 +50,8 @@ export default observer(function AppSelector(props) {
   if (search) records = records.filter(x => includes(x['app_name'], search) || includes(x['app_key'], search));
   if (search_tag) records = records.filter(x => x['app_rel_tags'].includes(search_tag));
   if (props.filter) records = records.filter(x => props.filter(x));
+  // 重启只能选择容器镜像的发布
+  if (props.restart) records = records.filter(x => x['extend'] === '3');
 
   const tags = tagStore.records || []
 
@@ -58,10 +60,17 @@ export default observer(function AppSelector(props) {
       visible={props.visible}
       width={850}
       maskClosable={false}
-      title="选择应用"
+      title={
+        (
+          <div>
+            {props.restart ? "选择应用重启" : "选择应用"}
+          </div>
+        )
+      }
       bodyStyle={{padding: 0}}
       onCancel={props.onCancel}
       footer={null}>
+      {props.restart ? <span style={{padding: "24px 24px 0 24px", color: "#1890ff"}}>重启目前只支持容器发布类型环境的应用</span> : null}
       <div className={styles.appSelector}>
         <div className={styles.left}>
           <Spin spinning={envStore.isFetching}>
@@ -73,7 +82,7 @@ export default observer(function AppSelector(props) {
               onSelect={({selectedKeys}) => setEnvId(selectedKeys[0])}/>
           </Spin>
         </div>
-
+        
         <div className={styles.right}>
           <Spin spinning={fetching}>
             <div className={styles.title}>

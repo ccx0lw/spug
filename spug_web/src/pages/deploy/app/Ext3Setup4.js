@@ -123,6 +123,22 @@ export default observer(function () {
           onChange={v => info['hook_post_host'] = cleanCommand(v)}
           style={{border: '1px solid #e8e8e8'}}/>
       </Form.Item>
+      <Form.Item
+        label="重启应用的脚本"
+        style={{marginTop: 12, marginBottom: 24}}
+        tooltip="重启应用的脚本（不会上传文件，但是可以使用除代码相关以外的环境变量）"
+        extra={<span>{Tips}，可以在发布后进行重启服务等操作。</span>}>
+        <ACEditor
+          readOnly={store.isReadOnly}
+          mode="sh"
+          theme="tomorrow"
+          width="100%"
+          height="150px"
+          placeholder="输入要执行的命令"
+          value={info['hook_restart_host']}
+          onChange={v => info['hook_restart_host'] = cleanCommand(v)}
+          style={{border: '1px solid #e8e8e8'}}/>
+      </Form.Item>
       <Form.Item wrapperCol={{span: 14, offset: 6}}>
         <Button disabled={store.isReadOnly} loading={loading} type="primary" onClick={handleSubmit}>提交</Button>
         <Button style={{marginLeft: 20}} onClick={() => store.page -= 1}>上一步</Button>

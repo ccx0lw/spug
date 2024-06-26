@@ -15,9 +15,11 @@ class Store {
   @observable tabs = [];
   @observable isFetching = false;
   @observable addVisible = false;
+  @observable filterRestartVisble = false;
   @observable ext1Visible = false;
   @observable ext2Visible = false;
   @observable ext3Visible = false;
+  @observable restartVisble = false;
   @observable batchVisible = false;
   @observable approveVisible = false;
   @observable rollbackVisible = false;
@@ -105,11 +107,16 @@ class Store {
     if (deploy.extend === '1') {
       this.ext1Visible = true
     } else if (deploy.extend === '3') {
-      this.ext3Visible = true
+      if (this.filterRestartVisble) {
+          this.restartVisble = true
+      } else {
+        this.ext3Visible = true
+      }
     } else {
       this.ext2Visible = true
     }
     this.addVisible = false
+    this.filterRestartVisble = false
   };
 
   rollback = (info) => {

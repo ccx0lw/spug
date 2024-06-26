@@ -149,6 +149,11 @@ class RequestDetailView(View):
                 outputs['local']['data'] = f'{human_time()} 读取数据...        ' + outputs['local']['data']
             else:
                 outputs['local'].update(step=100, data=f'{human_time()} 已构建完成忽略执行。')
+                
+        if req.type == '0':
+            del outputs['local']
+            del outputs['image']
+            
         return json_response(response)
 
     @auth('deploy.request.do')
@@ -198,6 +203,11 @@ class RequestDetailView(View):
                 outputs['image'] = {'id': 'image', 'step': 100, 'data': f'{human_time()} 已编译完成忽略执行。', 'title': '镜像编译'}
             else:
                 outputs['image'] = {'id': 'image', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': '镜像编译'}
+        
+        if req.type == '0':
+            del outputs['local']
+            del outputs['image']
+        
         return json_response({'outputs': outputs})
 
     @auth('deploy.request.approve')
@@ -221,6 +231,8 @@ class RequestDetailView(View):
             req.save()
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_rst')).start()
         return json_response(error=error)
+    
+# 重启服务
 
 
 @auth('deploy.request.add|deploy.request.edit')
@@ -358,7 +370,7 @@ def post_request_ext3(request):
         Argument('id', type=int, required=False),
         Argument('deploy_id', type=int, help='参数错误'),
         Argument('name', help='请输入申请标题'),
-        Argument('extra', type=list, help='请选择发布版本'),
+        Argument('extra', type=list, help='请选择发布版本', default=[]),
         Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
         Argument('type', default='1'),
         Argument('plan', required=False),
@@ -367,47 +379,49 @@ def post_request_ext3(request):
     if error is None:
         deploy = Deploy.objects.get(pk=form.deploy_id)
         form.spug_version = Repository.make_spug_version(deploy.id)
-        if form.extra[0] == 'tag':
-            if not form.extra[1]:
-                return json_response(error='请选择要发布的版本')
-            form.version = form.extra[1]
-        elif form.extra[0] == 'branch':
-            if not form.extra[2]:
-                return json_response(error='请选择要发布的分支及Commit ID')
-            form.version = f'{form.extra[1]}#{form.extra[2][:6]}'
-        elif form.extra[0] == 'repository':
-            if not form.extra[1]:
-                return json_response(error='请选择要发布的版本')
-            repository = Repository.objects.get(pk=form.extra[1])
-            form.repository_id = repository.id
-            form.version = repository.version
-            form.spug_version = repository.spug_version
-            form.extra = ['repository'] + json.loads(repository.extra)
-        elif form.extra[0] == 'docker_image':
-            if not form.extra[1]:
-                return json_response(error='请选择要发布的镜像版本')
-            dockerImage = DockerImage.objects.get(id=form.extra[1])
-            form.docker_image_id = dockerImage.id
-            form.repository_id = dockerImage.repository.id
-            form.version = dockerImage.version
-            form.spug_version = dockerImage.spug_version
-            form.extra = ['docker_image'] + json.loads(dockerImage.extra)
-        else:
-            return json_response(error='参数错误')
-
-        # 获取环境，对应的环境是否是生产环境。 是则form.extra[0]只能是tag
-        if (deploy.env.prod and form.extra[0] != 'tag'):
-            if (form.extra[0] == 'repository'):
-                if (form.extra[1] != 'tag'):
-                    return json_response(error='生产环境只能选择tag代码')
-            elif (form.extra[0] == 'docker_image'):
-                if (form.extra[1] == 'repository'):
-                    if (form.extra[2] != 'tag'):
-                        return json_response(error='生产环境只能选择tag代码')
-                elif (form.extra[1] != 'tag'):
-                    return json_response(error='生产环境只能选择tag代码')
+        # 不是重启类型才需要验证
+        if form.type != '0':
+            if form.extra[0] == 'tag':
+                if not form.extra[1]:
+                    return json_response(error='请选择要发布的版本')
+                form.version = form.extra[1]
+            elif form.extra[0] == 'branch':
+                if not form.extra[2]:
+                    return json_response(error='请选择要发布的分支及Commit ID')
+                form.version = f'{form.extra[1]}#{form.extra[2][:6]}'
+            elif form.extra[0] == 'repository':
+                if not form.extra[1]:
+                    return json_response(error='请选择要发布的版本')
+                repository = Repository.objects.get(pk=form.extra[1])
+                form.repository_id = repository.id
+                form.version = repository.version
+                form.spug_version = repository.spug_version
+                form.extra = ['repository'] + json.loads(repository.extra)
+            elif form.extra[0] == 'docker_image':
+                if not form.extra[1]:
+                    return json_response(error='请选择要发布的镜像版本')
+                dockerImage = DockerImage.objects.get(id=form.extra[1])
+                form.docker_image_id = dockerImage.id
+                form.repository_id = dockerImage.repository.id
+                form.version = dockerImage.version
+                form.spug_version = dockerImage.spug_version
+                form.extra = ['docker_image'] + json.loads(dockerImage.extra)
             else:
-                return json_response(error='生产环境只能选择tag代码')
+                return json_response(error='参数错误')
+
+            # 获取环境，对应的环境是否是生产环境。 是则form.extra[0]只能是tag
+            if (deploy.env.prod and form.extra[0] != 'tag'):
+                if (form.extra[0] == 'repository'):
+                    if (form.extra[1] != 'tag'):
+                        return json_response(error='生产环境只能选择tag代码')
+                elif (form.extra[0] == 'docker_image'):
+                    if (form.extra[1] == 'repository'):
+                        if (form.extra[2] != 'tag'):
+                            return json_response(error='生产环境只能选择tag代码')
+                    elif (form.extra[1] != 'tag'):
+                        return json_response(error='生产环境只能选择tag代码')
+                else:
+                    return json_response(error='生产环境只能选择tag代码')
 
         form.extra = json.dumps(form.extra)
         form.status = '0' if deploy.is_audit else '1'

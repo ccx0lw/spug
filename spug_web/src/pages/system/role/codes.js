@@ -96,6 +96,7 @@ export default [{
     label: '发布申请',
     perms: [
       {key: 'view', label: '查看申请'},
+      {key: 'restart', label: '重启服务'},
       {key: 'add', label: '新建申请'},
       {key: 'edit', label: '编辑申请'},
       {key: 'del', label: '删除申请'},

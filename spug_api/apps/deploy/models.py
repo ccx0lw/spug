@@ -22,6 +22,7 @@ class DeployRequest(models.Model, ModelMixin):
         ('3', '发布成功'),
     )
     TYPES = (
+        ('0', '重启'),
         ('1', '正常发布'),
         ('2', '回滚'),
         ('3', '自动发布'),

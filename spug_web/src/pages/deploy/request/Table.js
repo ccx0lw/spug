@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import { observer } from 'mobx-react';
-import { BranchesOutlined, BuildOutlined, TagOutlined, PlusOutlined, TagsOutlined, ContainerOutlined } from '@ant-design/icons';
+import { BranchesOutlined, BuildOutlined, TagOutlined, PlusOutlined, TagsOutlined, ContainerOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Radio, Modal, Popover, Tag, Popconfirm, Tooltip, message } from 'antd';
 import { http, hasPermission } from 'libs';
 import { Action, AuthButton, TableCard } from 'components';
@@ -30,9 +30,10 @@ function ComTable() {
     className: S.min80,
     render: info => (
       <div>
-        {info.type === '2' && <Tooltip title="回滚发布"><Tag color="#f50">R</Tag></Tooltip>}
-        {info.type === '3' && <Tooltip title="Webhook触发"><Tag color="#87d068">A</Tag></Tooltip>}
-        {info.plan && <Tooltip title={`定时发布（${info.plan}）`}> <Tag color="#108ee9">P</Tag></Tooltip>}
+        {info.type === '0' && <Tooltip title="重启服务"><Tag color="#f50">重启</Tag></Tooltip>}
+        {info.type === '2' && <Tooltip title="回滚发布"><Tag color="#f50">回滚</Tag></Tooltip>}
+        {info.type === '3' && <Tooltip title="Webhook触发"><Tag color="#87d068">Hook</Tag></Tooltip>}
+        {info.plan && <Tooltip title={`定时发布（${info.plan}）`}> <Tag color="#108ee9">定时</Tag></Tooltip>}
         {info.name}
       </div>
     )
@@ -232,10 +233,15 @@ function ComTable() {
       onReload={store.fetchRecords}
       actions={[
         <AuthButton
+          auth="deploy.request.restart"
+          type="primary"
+          icon={<ReloadOutlined/>}
+          onClick={() => {store.addVisible = true; store.filterRestartVisble = true;}}>重启服务申请</AuthButton>,
+        <AuthButton
           auth="deploy.request.add"
           type="primary"
           icon={<PlusOutlined/>}
-          onClick={() => store.addVisible = true}>新建申请</AuthButton>,
+          onClick={() => store.addVisible = true}>新建发布申请</AuthButton>,
         <Radio.Group value={store.f_status} onChange={e => store.f_status = e.target.value}>
           <Radio.Button value="all">全部({store.counter['all'] || 0})</Radio.Button>
           <Radio.Button value="0">待审核({store.counter['0'] || 0})</Radio.Button>

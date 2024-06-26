@@ -199,6 +199,7 @@ class DeployView(View):
                     Argument('hook_post_image', handler=str.strip, default=''),
                     Argument('hook_pre_host', handler=str.strip, default=''),
                     Argument('hook_post_host', handler=str.strip, default=''),
+                    Argument('hook_restart_host', handler=str.strip, default=''),
                     Argument('image_name', handler=str.strip, default=''),
                     Argument('image_version', handler=str.strip, default=''),
                     Argument('build_image_host_id', handler=str.strip, default=''),

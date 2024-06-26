@@ -11,6 +11,7 @@ import { SearchForm, AuthDiv, AuthButton, Breadcrumb, AppSelector } from 'compon
 import Ext1Form from './Ext1Form';
 import Ext2Form from './Ext2Form';
 import Ext3Form from './Ext3Form';
+import RestartFrom from './RestartFrom';
 import Approve from './Approve';
 import ComTable from './Table';
 import Ext1Console from './Ext1Console';
@@ -96,11 +97,13 @@ function Index() {
       <ComTable/>
       <AppSelector
         visible={store.addVisible}
-        onCancel={() => store.addVisible = false}
+        restart={store.filterRestartVisble}
+        onCancel={() => {store.addVisible = false; store.filterRestartVisble = false;}}
         onSelect={store.confirmAdd}/>
       {store.ext1Visible && <Ext1Form/>}
       {store.ext2Visible && <Ext2Form/>}
       {store.ext3Visible && <Ext3Form/>}
+      {store.restartVisble && <RestartFrom/>}
       {store.batchVisible && <BatchDelete/>}
       {store.approveVisible && <Approve/>}
       {store.rollbackVisible && <Rollback/>}
