@@ -10,7 +10,7 @@ from apps.repository.models import Repository
 from apps.docker_image.models import DockerImage
 import json
 import os
-import datetime
+from datetime import datetime
 
 class DeployRequest(models.Model, ModelMixin):
     STATUS = (
@@ -59,7 +59,8 @@ class DeployRequest(models.Model, ModelMixin):
         return False
     
     def save(self, *args, **kwargs):
-        self.created_at_date = datetime.strptime(self.created_at, '%Y-%m-%d %H:%M:%S').date()
+        if self.created_at:
+            self.created_at_date = datetime.strptime(self.created_at, '%Y-%m-%d %H:%M:%S').date()
         if self.approve_at:
             self.approve_at_date = datetime.strptime(self.approve_at, '%Y-%m-%d %H:%M:%S').date()
         super().save(*args, **kwargs)

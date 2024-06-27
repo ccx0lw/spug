@@ -235,6 +235,8 @@ class DeployView(View):
                 return json_response(error='已存在关联的发布记录，请删除关联的发布记录后再尝试删除发布配置')
             for item in deploy.repository_set.all():
                 item.delete()
+            for item in deploy.dockerimage_set.all():
+                item.delete()
             deploy.delete()
         return json_response(error=error)
     

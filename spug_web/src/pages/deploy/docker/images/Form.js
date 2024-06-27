@@ -158,7 +158,7 @@ export default observer(function () {
           <Form.Item style={{display: 'inline-block', marginBottom: 0, width: '450px'}}>
             <Input.Group compact>
               <Select value={git_type} onChange={switchType} style={{width: 100}}>
-                <Select.Option value="branch">Branch</Select.Option>
+                <Select.Option value="branch" disabled={store.deploy.env_prod}>Branch</Select.Option>
                 <Select.Option value="tag">Tag</Select.Option>
                 <Select.Option value="repository">构建仓库</Select.Option>
               </Select>
@@ -184,7 +184,7 @@ export default observer(function () {
                       </div>
                     </Select.Option>
                   ))
-                ) : (
+                ) : git_type === 'repository' ? (
                   repositories.map(item => (
                     <Select.Option key={item.id} value={item.id} content={item.version}>
                       <div style={{display: 'flex', justifyContent: 'space-between'}}>
@@ -193,7 +193,7 @@ export default observer(function () {
                       </div>
                     </Select.Option>
                   ))
-                )}
+                ) : null}
               </Select>
             </Input.Group>
           </Form.Item>

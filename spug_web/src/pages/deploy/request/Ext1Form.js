@@ -214,7 +214,7 @@ export default observer(function () {
                       </div>
                     </Select.Option>
                   ))
-                ) : (
+                ) : git_type === 'repository' ? (
                   repositories.map(item => (
                     <Select.Option key={item.id} value={item.id} content={item.version}
                                    disabled={type === '2' && item.id >= rb_id}>
@@ -224,7 +224,7 @@ export default observer(function () {
                       </div>
                     </Select.Option>
                   ))
-                )}
+                ) : null}
               </Select>
             </Input.Group>
           </Form.Item>
