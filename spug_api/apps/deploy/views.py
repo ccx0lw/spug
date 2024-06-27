@@ -29,6 +29,32 @@ class RequestView(View):
             perms = request.user.deploy_perms
             query['deploy__app_id__in'] = perms['apps']
             query['deploy__env_id__in'] = perms['envs']
+        
+        # 接收传参查询过滤，避免量太大
+        # 时间, 默认查询7天。最多不能超过30天
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        if (start_date is None or end_date is None or start_date == 'undefined' or end_date == 'undefined'):
+            return json_response(error='必须选择开始和结束日期')
+        
+        # 判断日期格式
+        date_format = "%Y-%m-%d"
+        try:
+            start_date = datetime.strptime(start_date, date_format)
+            end_date = datetime.strptime(end_date, date_format)
+        except ValueError:
+            return json_response(error='日期格式必须是 YYYY-MM-DD')
+
+        # 判断开始日期是否早于结束日期
+        if start_date > end_date:
+            return json_response(error='开始日期必须早于结束日期')
+
+        # 判断日期范围是否超过60天
+        if (end_date - start_date).days > 60:
+            return json_response(error='时间范围不能超过60天')
+        
+        query['created_at_date__range'] = (start_date, end_date)
+        
         for item in DeployRequest.objects.filter(**query).annotate(
                 env_id=F('deploy__env_id'),
                 env_name=F('deploy__env__name'),
@@ -232,9 +258,6 @@ class RequestDetailView(View):
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_rst')).start()
         return json_response(error=error)
     
-# 重启服务
-
-
 @auth('deploy.request.add|deploy.request.edit')
 def post_request_ext1(request):
     form, error = JsonParser(

@@ -121,6 +121,11 @@ export default observer(function () {
       }, () => setLoading(false))
   }
 
+  function isVariableFormat(str) {
+    const regex = /^(\$[A-Z_][A-Z0-9_]*|\$\{[A-Z_][A-Z0-9_]*\})$/i;
+    return regex.test(str);
+  }
+
   const {branches, tags} = versions;
   return (
     <Modal
@@ -141,9 +146,10 @@ export default observer(function () {
       confirmLoading={loading}
       onOk={handleSubmit}>
       <Form form={form} initialValues={store.record} labelCol={{span: 5}} wrapperCol={{span: 17}}>
-        {/* <Form.Item required name="version" label="构建版本">
-          <Input placeholder="请输入构建版本"/>
-        </Form.Item> */}
+        {
+          isVariableFormat(store.deploy.image_version) ? null
+          : <span style={{color:"#f50"}}>警告: 该镜像是固定[{store.deploy.image_version}]版本发布，提前编译上传可能会导致服务器上应用最新的镜像。导致服务提前发布到生产的风险。多实例服务可能会导致某些实例是新的，某些实例是旧的。</span>
+        }
         <Form.Item required label="选择分支/标签/版本" style={{marginBottom: 12}} extra={<span>
             根据网络情况，首次刷新可能会很慢，请耐心等待。
             <a target="_blank" rel="noopener noreferrer"

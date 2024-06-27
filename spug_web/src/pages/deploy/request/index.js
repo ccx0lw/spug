@@ -81,7 +81,7 @@ function Index() {
             ))}
           </Select>
         </SearchForm.Item>
-        <SearchForm.Item span={8} title="时间">
+        <SearchForm.Item span={8} title="申请时间">
           <DatePicker.RangePicker
             value={store.f_s_date ? [moment(store.f_s_date), moment(store.f_e_date)] : undefined}
             onChange={store.updateDate}/>

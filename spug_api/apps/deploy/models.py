@@ -10,7 +10,7 @@ from apps.repository.models import Repository
 from apps.docker_image.models import DockerImage
 import json
 import os
-
+import datetime
 
 class DeployRequest(models.Model, ModelMixin):
     STATUS = (
@@ -43,8 +43,10 @@ class DeployRequest(models.Model, ModelMixin):
     fail_host_ids = models.TextField(default='[]')
 
     created_at = models.CharField(max_length=20, default=human_datetime)
+    created_at_date = models.DateField(null=True)
     created_by = models.ForeignKey(User, models.PROTECT, related_name='+')
     approve_at = models.CharField(max_length=20, null=True)
+    approve_at_date = models.DateField(null=True)
     approve_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
     do_at = models.CharField(max_length=20, null=True)
     do_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
@@ -55,6 +57,12 @@ class DeployRequest(models.Model, ModelMixin):
             extra = json.loads(self.extra)
             return extra[0] in ('branch', 'tag')
         return False
+    
+    def save(self, *args, **kwargs):
+        self.created_at_date = datetime.strptime(self.created_at, '%Y-%m-%d %H:%M:%S').date()
+        if self.approve_at:
+            self.approve_at_date = datetime.strptime(self.approve_at, '%Y-%m-%d %H:%M:%S').date()
+        super().save(*args, **kwargs)
 
     def delete(self, using=None, keep_parents=False):
         super().delete(using, keep_parents)

@@ -6,7 +6,7 @@
 import { observable, computed } from "mobx";
 import http from 'libs/http';
 import moment from 'moment';
-import lds from 'lodash';
+import lds, { isEmpty } from 'lodash';
 
 class Store {
   @observable records = [];
@@ -36,10 +36,10 @@ class Store {
     if (this.f_tag)    data = data.filter(x => x.app_rel_tags.includes(this.f_tag))
     if (this.f_app_id) data = data.filter(x => x.app_id === this.f_app_id)
     if (this.f_env_id) data = data.filter(x => x.env_id === this.f_env_id)
-    if (this.f_s_date) data = data.filter(x => {
-      const date = x.created_at.substr(0, 10);
-      return date >= this.f_s_date && date <= this.f_e_date
-    })
+    // if (this.f_s_date) data = data.filter(x => {
+    //   const date = x.created_at.substr(0, 10);
+    //   return date >= this.f_s_date && date <= this.f_e_date
+    // })
     if (this.f_status !== 'all') {
       if (this.f_status === '99') {
         data = data.filter(x => ['-1', '2'].includes(x.status))
@@ -52,7 +52,15 @@ class Store {
 
   fetchRecords = () => {
     this.isFetching = true;
-    http.get('/api/deploy/request/')
+    if (isEmpty(this.f_s_date) || isEmpty(this.f_e_date)) {
+      let currentDate = new Date();
+      let sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(currentDate.getDate() - 7);
+
+      this.f_s_date = sevenDaysAgo.toISOString().split('T')[0];
+      this.f_e_date = currentDate.toISOString().split('T')[0];
+    }
+    http.get('/api/deploy/request/?start_date='+this.f_s_date+'&end_date='+this.f_e_date)
       .then(res => this.records = res)
       .then(this._updateCounter)
       .finally(() => this.isFetching = false)
@@ -99,6 +107,7 @@ class Store {
       this.f_s_date = null;
       this.f_e_date = null
     }
+    this.fetchRecords();
   };
 
   confirmAdd = (deploy) => {
