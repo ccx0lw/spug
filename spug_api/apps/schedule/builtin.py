@@ -41,7 +41,14 @@ def auto_run_by_day():
                 if index > item.versions and req.repository_id:
                     req.repository.delete()
                 index += 1
-
+                
+        for item in DeployExtend3.objects.all():
+            index = 0
+            for req in DeployRequest.objects.filter(deploy_id=item.deploy_id, docker_image_id__isnull=False):
+                if index > item.versions and req.docker_image_id:
+                    req.docker_image.delete()
+                index += 1
+                
         timer = defaultdict(int)
         for item in ExecHistory.objects.all():
             if timer[item.user_id] >= 10:

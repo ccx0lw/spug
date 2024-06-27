@@ -196,9 +196,21 @@ function Ext3Console(props) {
                     <Steps size="small" className={styles.step} current={item.step} status={item.status}>
                       <StepItem title="等待调度" item={item} step={0}/>
                       <StepItem title="数据准备" item={item} step={1}/>
-                      <StepItem title="发布前任务" item={item} step={2}/>
-                      <StepItem title="执行发布" item={item} step={3}/>
-                      <StepItem title="发布后任务" item={item} step={4}/>
+                      <StepItem title={
+                        (
+                          <span>{props.request.type === "0" ? "重启" : "发布"}前任务</span>
+                        )
+                      } item={item} step={2}/>
+                      <StepItem title={
+                        (
+                          <span>执行{props.request.type === "0" ? "重启" : "发布"}</span>
+                        )
+                      } item={item} step={3}/>
+                      <StepItem title={
+                        (
+                          <span>{props.request.type === "0" ? "重启" : "发布"}后任务</span>
+                        )
+                      } item={item} step={4}/>
                     </Steps>
                     <CodeOutlined className={styles.codeIcon} onClick={e => openTerminal(e, item)}/>
                   </div>}>
