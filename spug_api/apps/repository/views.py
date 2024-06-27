@@ -140,7 +140,10 @@ def get_detail(request, r_id):
     rds, counter = get_redis_connection(), 0
     if repository.remarks == 'SPUG AUTO MAKE':
         req = repository.deployrequest_set.filter(repository_id=repository.id, spug_version=repository.spug_version).last()
-        key = f'{settings.REQUEST_KEY}:{req.id}'
+        if req is not None:
+            key = f'{settings.REQUEST_KEY}:{req.id}'
+        else:
+            return json_response(error='未找到构建匹配的发布记录，发布记录可能被删除')
     elif repository.remarks == 'SPUG AUTO MAKE BY IMAGE BUILD':
         key = f'{settings.BUILD_IMAGE_KEY}:{repository.spug_version}'
     else:

@@ -165,8 +165,7 @@ def get_detail(request, r_id):
         if req is not None:
             key = f'{settings.REQUEST_KEY}:{req.id}'
         else:
-            # 处理没有找到 deployrequest 的情况
-            return json_response(error='未找到指定的 deployrequest')
+            return json_response(error='未找到编译匹配的发布记录，发布记录可能被删除')
     else:
         key = f'{settings.BUILD_IMAGE_KEY}:{docker_image.spug_version}'
     
