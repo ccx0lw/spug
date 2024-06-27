@@ -55,7 +55,7 @@ class Store {
     if (isEmpty(this.f_s_date) || isEmpty(this.f_e_date)) {
       let currentDate = new Date();
       let sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(currentDate.getDate() - 7);
+      sevenDaysAgo.setDate(currentDate.getDate() - 30);
 
       this.f_s_date = sevenDaysAgo.toISOString().split('T')[0];
       this.f_e_date = currentDate.toISOString().split('T')[0];
