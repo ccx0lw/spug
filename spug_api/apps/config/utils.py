@@ -9,9 +9,9 @@ def compose_configs(app, env_id, no_prefix=True):
     configs = dict()
     # app own configs
     for item in Config.objects.filter(type='app', o_id=app.id, env_id=env_id).only('key', 'value'):
-        # 忽略不是以_SPUG_开头的key
-        if not item.key.startswith('_SPUG_'):
-            continue
+        # # 忽略不是以_SPUG_开头的key
+        # if not item.key.startswith('_SPUG_'):
+        #     continue
         key = item.key if no_prefix else f'{app.key}_{item.key}'
         configs[key] = item.value
 
@@ -21,9 +21,9 @@ def compose_configs(app, env_id, no_prefix=True):
         if app_ids:
             id_key_map = {x.id: x.key for x in App.objects.filter(id__in=app_ids)}
             for item in Config.objects.filter(type='app', o_id__in=app_ids, env_id=env_id, is_public=True).only('key', 'value'):
-                # 忽略不是以_SPUG_开头的key
-                if not item.key.startswith('_SPUG_'):
-                    continue
+                # # 忽略不是以_SPUG_开头的key
+                # if not item.key.startswith('_SPUG_'):
+                #     continue
                 key = item.key if no_prefix else f'{id_key_map[item.o_id]}_{item.key}'
                 configs[key] = item.value
 
@@ -33,9 +33,9 @@ def compose_configs(app, env_id, no_prefix=True):
         if src_ids:
             id_key_map = {x.id: x.key for x in Service.objects.filter(id__in=src_ids)}
             for item in Config.objects.filter(type='src', o_id__in=src_ids, env_id=env_id).only('key', 'value'):
-                # 忽略不是以_SPUG_开头的key
-                if not item.key.startswith('_SPUG_'):
-                    continue
+                # # 忽略不是以_SPUG_开头的key
+                # if not item.key.startswith('_SPUG_'):
+                #     continue
                 key = item.key if no_prefix else f'{id_key_map[item.o_id]}_{item.key}'
                 configs[key] = item.value
     return configs
