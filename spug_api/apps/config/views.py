@@ -430,7 +430,7 @@ def clean_strip(parameters):
     return parameters
     
 class FileTemplateView(View):
-    @auth('file.template.view')
+    @auth('config.file.template.view')
     def get(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
@@ -455,7 +455,7 @@ class FileTemplateView(View):
                 templates = [t.to_view() for t in templates]
         return json_response(templates)
 
-    @auth('file.template.add|file.template.edit')
+    @auth('config.file.template.add|config.file.template.edit')
     def post(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
@@ -476,7 +476,7 @@ class FileTemplateView(View):
                 FileTemplate.objects.create(**form)
         return json_response(error=error)
 
-    @auth('file.template.del')
+    @auth('config.file.template.del')
     def delete(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='请指定操作对象')
@@ -486,7 +486,7 @@ class FileTemplateView(View):
         return json_response(error=error)
     
 class ContainerRepositoryView(View):
-    @auth('container.repository.view')
+    @auth('config.container.repository.view')
     def get(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False)
@@ -498,7 +498,7 @@ class ContainerRepositoryView(View):
                 return json_response(repository)
         return json_response(repositorys)
 
-    @auth('container.repository.add|container.repository.edit')
+    @auth('config.container.repository.add|config.container.repository.edit')
     def post(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
@@ -521,7 +521,7 @@ class ContainerRepositoryView(View):
                 ContainerRepository.objects.create(**form)
         return json_response(error=error)
 
-    @auth('container.repository.del')
+    @auth('config.container.repository.del')
     def delete(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='请指定操作对象')
