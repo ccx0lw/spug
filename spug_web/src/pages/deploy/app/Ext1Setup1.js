@@ -57,7 +57,7 @@ export default observer(function Ext1Setup1() {
     if (isEmpty(info['dst_repo'])) {
       info['dst_repo'] = "/var/spug/repos/$SPUG_ENV_KEY/$SPUG_APP_KEY"
     }
-    if (isEmpty(info['versions'])) {
+    if (info['versions'] === undefined) {
       info['versions'] = 1
     }
   }

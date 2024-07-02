@@ -58,7 +58,7 @@ export default observer(function AppSelector(props) {
   return (
     <Modal
       visible={props.visible}
-      width={850}
+      width={900}
       maskClosable={false}
       title={
         (
