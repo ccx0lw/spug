@@ -430,7 +430,7 @@ def clean_strip(parameters):
     return parameters
     
 class FileTemplateView(View):
-    @auth('config.file.template.view')
+    @auth('config.template.file.view')
     def get(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
@@ -455,7 +455,7 @@ class FileTemplateView(View):
                 templates = [t.to_view() for t in templates]
         return json_response(templates)
 
-    @auth('config.file.template.add|config.file.template.edit')
+    @auth('config.template.file.add|config.template.file.edit')
     def post(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
@@ -476,7 +476,7 @@ class FileTemplateView(View):
                 FileTemplate.objects.create(**form)
         return json_response(error=error)
 
-    @auth('config.file.template.del')
+    @auth('config.template.file.del')
     def delete(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='请指定操作对象')
