@@ -6,12 +6,14 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react';
 import { Link } from 'react-router-dom';
-import { Switch, Form, Input, Select, Button, Radio } from 'antd';
+import { Switch, Form, Input, Select, Button, Radio, Tag } from 'antd';
 import Repo from './Repo';
 import envStore from 'pages/config/environment/store';
 import HostSelector from 'pages/host/Selector';
 import store from './store';
 import { isEmpty } from 'lodash';
+import hostStore from 'pages/host/store';
+import lds from 'lodash';
 
 export default observer(function Ext1Setup1() {
   const [envs, setEnvs] = useState([]);
@@ -23,6 +25,7 @@ export default observer(function Ext1Setup1() {
   }
 
   useEffect(() => {
+    hostStore.initial()
     if (store.currentRecord['deploys'] === undefined) {
       store.loadDeploys(store.app_id).then(updateEnvs)
     } else {
@@ -88,6 +91,14 @@ export default observer(function Ext1Setup1() {
       </Form.Item>
       <Form.Item required label="目标主机" tooltip="该发布配置作用于哪些目标主机。">
         <HostSelector value={info.host_ids} onChange={ids => info.host_ids = ids}/>
+        <span>
+          {info.host_ids.slice(0, Math.min(3, info.host_ids.length)).map((id) => (
+            <Tag color="#2db7f5" key={id} style={{ marginRight: 8 }}>
+              {lds.get(hostStore.idMap, `${id}.name`)}[{lds.get(hostStore.idMap, `${id}.hostname`)}]
+            </Tag>
+          ))}
+        </span>
+        {info.host_ids.length > 3 ? (<span> ... 还有{info.host_ids.length-3}台</span>) : (<span></span>)}
       </Form.Item>
       <Form.Item required label="部署路径" tooltip="应用最终在主机上的部署路径，为了数据安全请确保该目录不存在，Spug 将会自动创建并接管该目录，可使用全局变量，例如：/www/$SPUG_APP_KEY">
         <Input value={info['dst_dir']} onChange={e => info['dst_dir'] = e.target.value} placeholder="请输入部署目标路径"/>

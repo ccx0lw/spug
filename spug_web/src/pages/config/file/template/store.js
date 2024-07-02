@@ -8,9 +8,10 @@ import { http, includes } from 'libs';
 
 class Store {
   ParameterTypes = {
-    'string': '文本框',
+    'string': '单行文本框',
     'password': '密码框',
-    'select': '下拉选择'
+    'select': '下拉选择',
+    'textarea': '多行文本框'
   }
 
   FileTypes = [

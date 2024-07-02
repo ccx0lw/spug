@@ -6,10 +6,12 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { Link } from 'react-router-dom';
-import { Form, Switch, Select, Button, Input, Radio } from 'antd';
+import { Form, Switch, Select, Button, Input, Radio, Tag } from 'antd';
 import envStore from 'pages/config/environment/store';
 import HostSelector from 'pages/host/Selector';
 import store from './store';
+import hostStore from 'pages/host/store';
+import lds from 'lodash';
 
 export default observer(function Ext2Setup1() {
   const [envs, setEnvs] = useState([]);
@@ -20,6 +22,7 @@ export default observer(function Ext2Setup1() {
   }
 
   useEffect(() => {
+    hostStore.initial()
     if (store.currentRecord['deploys'] === undefined) {
       store.loadDeploys(store.app_id).then(updateEnvs)
     } else {
@@ -71,6 +74,14 @@ export default observer(function Ext2Setup1() {
       </Form.Item>
       <Form.Item required label="目标主机" tooltip="该发布配置作用于哪些目标主机。">
         <HostSelector value={info.host_ids} onChange={ids => info.host_ids = ids}/>
+        <span>
+          {info.host_ids.slice(0, Math.min(3, info.host_ids.length)).map((id) => (
+            <Tag color="#2db7f5" key={id} style={{ marginRight: 8 }}>
+              {lds.get(hostStore.idMap, `${id}.name`)}[{lds.get(hostStore.idMap, `${id}.hostname`)}]
+            </Tag>
+          ))}
+        </span>
+        {info.host_ids.length > 3 ? (<span> ... 还有{info.host_ids.length-3}台</span>) : (<span></span>)}
       </Form.Item>
       <Form.Item label="发布模式" tooltip="串行即发布时一台完成后再发布下一台，期间出现异常则终止发布。并行则每个主机相互独立发布同时进行。">
         <Radio.Group

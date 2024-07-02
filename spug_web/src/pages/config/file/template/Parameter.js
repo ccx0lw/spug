@@ -56,7 +56,7 @@ export default function Parameter(props) {
       title="编辑参数"
       onCancel={props.onCancel}
       onOk={handleSubmit}>
-      <Form form={form} initialValues={props.parameter} labelCol={{span: 6}} wrapperCol={{span: 14}}>
+      <Form form={form} initialValues={props.parameter} labelCol={{span: 6}} wrapperCol={{span: 16}}>
         <Form.Item required name="name" label="参数名" tooltip="参数的简短名称。">
           <Input placeholder="请输入参数名称"/>
         </Form.Item>

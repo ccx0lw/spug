@@ -23,6 +23,8 @@ function Render({ type, value, onChange, options }) {
           ))}
         </Select>
       );
+    case 'textarea':
+      return <Input.TextArea value={value} onChange={e => onChange(e.target.value)} placeholder="请输入" />;
     default:
       return null;
   }
