@@ -6,8 +6,6 @@
 import React from 'react';
 import { Input, Select, Form } from 'antd';
 import { isEmpty } from 'lodash';
-import Console from '../repository/Console';
-
 
 function Render({ type, value, onChange, options }) {
   // 根据类型渲染不同的输入组件
