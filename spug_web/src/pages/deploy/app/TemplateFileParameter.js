@@ -5,6 +5,8 @@
  */
 import React from 'react';
 import { Input, Select, Form } from 'antd';
+import { isEmpty } from 'lodash';
+import Console from '../repository/Console';
 
 
 function Render({ type, value, onChange, options }) {
@@ -42,8 +44,15 @@ export default function Parameter({ parameters, param_values, onUpdate }) {
     <div>
       {parameters.length === 0 ? <span style={{ display: 'block', textAlign: 'center' }}>无</span> : null}
       {parameters.map(item => {
+        let value = valuesObj[item.variable];
+
         // 从 valuesObj 中获取当前项的值，如果不存在则使用默认值
-        const value = valuesObj[item.variable] || item.default;
+        if (value === undefined) {
+          value = item.default;
+          onUpdate(item.variable, item.default)
+        }
+        
+        
         return (
           <Form.Item
             required={item.required}
