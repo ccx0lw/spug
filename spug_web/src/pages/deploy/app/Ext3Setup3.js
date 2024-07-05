@@ -48,12 +48,18 @@ export default observer(function () {
     http.get('/api/config/file/template/?env_id='+store.deploy.env_id+'&type=dockerfile')
       .then(res => {
         setTemplate(res)
-        setParameters(res.parameters || [])
+        const pts = Array.isArray(res.parameters) ? res.parameters : [];
+        setParameters(pts || [])
         // 去掉不在parameters中的
-        const parameterNames = new Set(res.parameters?.map(param => param.variable))
+        const parameterNames = new Set(pts.map(param => param.variable));
         store.deploy.dockerfile_params = store.deploy.dockerfile_params?.filter(param => {
           return Object.keys(param).some(key => parameterNames.has(key))
-        }) || []
+        }) || [];
+        pts.forEach(param => {
+          if (!store.deploy.dockerfile_params.some(p => p.hasOwnProperty(param.variable)) && param.default != undefined) {
+            store.deploy.dockerfile_params.push({[param.variable]: param.default});
+          }
+        });
       })
       .finally(() => setLoading(false))
     initDefaultValue()

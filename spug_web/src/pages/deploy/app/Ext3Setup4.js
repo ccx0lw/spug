@@ -48,11 +48,17 @@ export default observer(function () {
     http.get('/api/config/file/template/?env_id='+store.deploy.env_id+'&type=yaml')
       .then(res => {
         setTemplate(res)
-        setParameters(res.parameters || [])
-        const parameterNames = new Set(res.parameters?.map(param => param.variable))
+        const pts = Array.isArray(res.parameters) ? res.parameters : [];
+        setParameters(pts)
+        const parameterNames = new Set(pts.map(param => param.variable));
         store.deploy.yaml_params = store.deploy.yaml_params?.filter(param => {
           return Object.keys(param).some(key => parameterNames.has(key))
-        }) || []
+        }) || [];
+        pts.forEach(param => {
+          if (!store.deploy.yaml_params.some(p => p.hasOwnProperty(param.variable)) && param.default != undefined) {
+            store.deploy.yaml_params.push({[param.variable]: param.default});
+          }
+        });
       })
       .finally(() => setLoading(false))
   }, [store.deploy.env_id])

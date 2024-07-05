@@ -5,34 +5,25 @@
  */
 import React from 'react';
 import { Input, Select, Form } from 'antd';
-import { isEmpty } from 'lodash';
 
-function Render({ type, value, onChange, options, defaultValue }) {
-  const handleChange = (newValue) => {
-    if (newValue === undefined) {
-      newValue = defaultValue;
-    }
-    onChange(newValue);
-  };
-
-
+function Render({ type, value, onChange, options}) {
   // 根据类型渲染不同的输入组件
   switch (type) {
     case 'string':
-      return <Input value={value} onChange={e => handleChange(e.target.value)} placeholder="请输入" />;
+      return <Input value={value} onChange={e => onChange(e.target.value)} placeholder="请输入" />;
     case 'password':
-      return <Input.Password value={value} onChange={e => handleChange(e.target.value)} placeholder="请输入" />;
+      return <Input.Password value={value} onChange={e => onChange(e.target.value)} placeholder="请输入" />;
     case 'select':
       const selectOptions = options.split('\n').map(x => x.split(':'));
       return (
-        <Select value={value} onChange={value => handleChange(value)} placeholder="请选择">
+        <Select value={value} onChange={value => onChange(value)} placeholder="请选择">
           {selectOptions.map((item, index) => (
             <Select.Option key={index} value={item[0]}>{item[1] || item[0]}</Select.Option>
           ))}
         </Select>
       );
     case 'textarea':
-      return <Input.TextArea value={value} onChange={e => handleChange(e.target.value)} placeholder="请输入" />;
+      return <Input.TextArea value={value} onChange={e => onChange(e.target.value)} placeholder="请输入" />;
     default:
       return null;
   }
@@ -57,7 +48,6 @@ export default function Parameter({ parameters, param_values, onUpdate }) {
           value = item.default;
         }
         
-        
         return (
           <Form.Item
             required={item.required}
@@ -71,7 +61,6 @@ export default function Parameter({ parameters, param_values, onUpdate }) {
               type={item.type}
               options={item.options}
               value={value}
-              defaultValue={item.default}
               onChange={value => onUpdate(item.variable, value)}
             />
           </Form.Item>
