@@ -54,6 +54,15 @@ export default observer(function () {
           >
           <Switch defaultChecked={store.record.prod}></Switch>
         </Form.Item>
+        <Form.Item
+          required
+          name="conc_num"
+          label="同时发布数量"
+          tooltip="同环境下最大同时发布应用数量"
+          extra="同环境下最大同时发布应用数量, <= 0 表示不限制"
+          >
+            <Input placeholder="请输入数量"/>
+        </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input.TextArea placeholder="请输入备注信息"/>
         </Form.Item>

@@ -94,7 +94,16 @@ class DockerImageView(View):
                         return json_response(error='生产环境只能选择tag代码')
                 else:
                     return json_response(error='生产环境只能选择tag代码')
-                
+            
+
+            # 容器镜像编译完后必须发布，否则不允许再次编译新的镜像
+            last_success_image = DockerImage.objects.filter(env_id = deploy.env.id, status = '5').order_by('-id').first()
+            if last_success_image:
+                last_request = DeployRequest.objects.filter(docker_image_id=last_success_image.id).order_by('-id').first()
+                if last_request is None or last_request.status != '3':
+                    # 判断最后一个发布申请的状态是否成功
+                    return json_response(error=f'{deploy.env.name}环境上次编译的镜像未发布/成功，请先发布后再编译新的镜像')
+            
             if form.extra[0] != 'repository':
                 form.spug_version = DockerImage.make_spug_version(deploy.id)
                 
@@ -190,5 +199,5 @@ def get_detail(request, r_id):
     response['index'] = counter
     if counter == 0:
         for item in outputs:
-            outputs[item]['data'] += '\r\n\r\n未读取到数据，Spug 仅保存最近2周的日志信息。'
+            outputs[item]['data'] += '\r\n\r\n未读取到数据，Spug 仅保存最近30天的日志信息。'
     return json_response(response)

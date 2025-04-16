@@ -99,7 +99,8 @@ def dispatch(rep: DockerImage, helper=None, env=None):
             container = ContainerRepository.objects.get(env_id=rep.env_id)
         except ContainerRepository.DoesNotExist:
             container = None  # 或者你可以处理不存在的情况
-            helper.send_info('image', f'\033[32m完成√\033[0m\r\n{human_time()} \033[31m[{rep.env_id}]镜像的仓库配置不存在\033[0m{rep.env.name}        ')
+            helper.send_info('image', f'\033[32m完成√\033[0m\r\n{human_time()} \033[31m[{rep.env.name}]镜像的仓库配置不存在, 请检查容器仓库对应的环境配置是否存在\033[0m        ')
+            raise Exception("镜像的仓库配置不存在, 请检查容器仓库对应的环境配置是否存在")
         except MultipleObjectsReturned:
             # 处理存在多个对象的情况
             helper.send_error('image', f'\033[31m异常x\033[0m\r\n{human_time()} \033[31m镜像仓库配置，存在多条匹配的数据...\033[0m        ')

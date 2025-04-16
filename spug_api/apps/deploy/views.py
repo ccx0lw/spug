@@ -141,7 +141,9 @@ class RequestDetailView(View):
         if req.is_quick_deploy:
             outputs['local'] = {'id': 'local', 'data': '', 'title': '代码构建'}
             if req.deploy.extend == '3':
-                outputs['image'] = {'id': 'image', 'data': '', 'title': '镜像编译'}
+                build_image_host_id = req.deploy.extend_obj.build_image_host_id
+                build_image_host = Host.objects.get(id=build_image_host_id)
+                outputs['image'] = {'id': 'image', 'data': '', 'title': f'镜像编译&上传 [{build_image_host.name}]'}
         if req.deploy.extend == '2':
             outputs['local'] = {'id': 'local', 'data': f'{human_time()} 读取数据...        '}
             response['s_actions'] = json.loads(req.deploy.extend_obj.server_actions)
@@ -149,8 +151,10 @@ class RequestDetailView(View):
             if not response['h_actions']:
                 response['outputs'] = {'local': outputs['local']}
         if req.deploy.extend == '3':
+            build_image_host_id = req.deploy.extend_obj.build_image_host_id
+            build_image_host = Host.objects.get(id=build_image_host_id)
             outputs['local'] = {'id': 'local', 'data': '', 'title': '代码构建'}
-            outputs['image'] = {'id': 'image', 'data': '', 'title': '镜像编译'}
+            outputs['image'] = {'id': 'image', 'data': '', 'title': f'镜像编译&上传 [{build_image_host.name}]'}
         rds, key, counter = get_redis_connection(), f'{settings.REQUEST_KEY}:{r_id}', 0
         data = rds.lrange(key, counter, counter + 9)
         while data:
@@ -168,7 +172,7 @@ class RequestDetailView(View):
         response['index'] = counter
         if counter == 0:
             for item in outputs:
-                outputs[item]['data'] += '\r\n\r\n未读取到数据，Spug 仅保存最近2周的日志信息。'
+                outputs[item]['data'] += '\r\n\r\n未读取到数据，Spug 仅保存最近30天的日志信息。'
 
         if req.is_quick_deploy:
             if outputs['local']['data']:
@@ -196,6 +200,34 @@ class RequestDetailView(View):
         if req.status not in ('1', '-3'):
             return json_response(error='该申请单当前状态还不能执行发布')
 
+        deploy = req.deploy
+        env = deploy.env
+        
+        rds, deploy_do_key, env_do_key = get_redis_connection(), f'{settings.DEPLOY_DO_EXEC_KEY}:deploy:{deploy.id}', f'{settings.DEPLOY_DO_EXEC_KEY}:env:{env.id}'
+
+        # 判断当前环境的应用是否在发布中
+        if rds.exists(deploy_do_key):
+            return json_response(error='当前应用有一个发布申请正在发布中，请等待上一个发布申请执行结束')
+
+        # 如果 env.conc_num <= 0，则不限制最大并发发布数量
+        if env.conc_num > 0:
+            # 获取当前环境正在发布的数量
+            current_env_count = int(rds.get(env_do_key) or 0)
+
+            # 判断是否超过最大并发发布数量
+            if current_env_count >= env.conc_num:
+                return json_response(error=f'{env.name}环境 最大同时发布数量{env.conc_num}，请等待前面的发布完成')
+
+        # 设置当前环境正在发布的数量和当前应用正在发布中
+        try:
+            # 使用 Redis 事务保证原子性
+            with rds.pipeline() as pipe:
+                pipe.incr(env_do_key)  # 增加当前环境的发布计数
+                pipe.set(deploy_do_key, 1, ex=10800)  # 设置当前应用正在发布中，设置过期时间为 3 小时
+                pipe.execute()
+        except Exception as e:
+            return json_response(error=f'发布状态redis更新失败: {str(e)}')
+        
         host_ids = req.fail_host_ids if form.mode == 'fail' else req.host_ids
         hosts = Host.objects.filter(id__in=json.loads(host_ids))
         message = f'{human_time()} 等待调度...        '
@@ -205,6 +237,7 @@ class RequestDetailView(View):
         req.do_by = request.user
         req.save()
         Thread(target=dispatch, args=(req, form.mode == 'fail')).start()
+
         if req.is_quick_deploy:
             if req.repository_id:
                 outputs['local'] = {'id': 'local', 'step': 100, 'data': f'{human_time()} 已构建完成忽略执行。', 'title': '代码构建'}
@@ -221,14 +254,17 @@ class RequestDetailView(View):
                 outputs = {'local': outputs['local']}
             return json_response({'s_actions': s_actions, 'h_actions': h_actions, 'outputs': outputs})
         if req.deploy.extend == '3':
+            build_image_host_id = req.deploy.extend_obj.build_image_host_id
+            build_image_host = Host.objects.get(id=build_image_host_id)
+
             if req.repository_id:
                 outputs['local'] = {'id': 'local', 'step': 100, 'data': f'{human_time()} 已构建完成忽略执行。', 'title': '代码构建'}
             else:
                 outputs['local'] = {'id': 'local', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': '代码构建'}
             if req.docker_image_id:
-                outputs['image'] = {'id': 'image', 'step': 100, 'data': f'{human_time()} 已编译完成忽略执行。', 'title': '镜像编译'}
+                outputs['image'] = {'id': 'image', 'step': 100, 'data': f'{human_time()} 已编译完成忽略执行。', 'title': f'镜像编译&上传 [{build_image_host.name}]'}
             else:
-                outputs['image'] = {'id': 'image', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': '镜像编译'}
+                outputs['image'] = {'id': 'image', 'step': 0, 'data': f'{human_time()} 建立连接...        ', 'title': f'镜像编译&上传 [{build_image_host.name}]'}
         
         if req.type == '0':
             del outputs['local']
@@ -323,6 +359,7 @@ def post_request_ext1_rollback(request):
         Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
         Argument('desc', required=False),
     ).parse(request.body)
+    
     if error is None:
         req = DeployRequest.objects.get(pk=form.pop('request_id'))
         requests = DeployRequest.objects.filter(deploy=req.deploy, status__in=('3', '-3'))

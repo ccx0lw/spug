@@ -12,6 +12,7 @@ class Environment(models.Model, ModelMixin):
     name = models.CharField(max_length=50)
     key = models.CharField(max_length=50)
     prod = models.BooleanField(default=False)
+    conc_num = models.IntegerField(default=5)  # 同一环境下，允许同时执行发布的应用数量
     desc = models.CharField(max_length=255, null=True)
     sort_id = models.IntegerField(default=0, db_index=True)
     created_at = models.CharField(max_length=20, default=human_datetime)

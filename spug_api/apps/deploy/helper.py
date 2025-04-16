@@ -253,8 +253,8 @@ class Helper:
 
     def clear(self):
         self.rds.delete(f'{self.key}_tmp')
-        # save logs for two weeks
-        self.rds.expire(self.key, 14 * 24 * 60 * 60)
+        # save logs for 30 days
+        self.rds.expire(self.key, 30 * 24 * 60 * 60)
         self.rds.close()
         # callback
         for func in self.callback:

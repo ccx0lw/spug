@@ -43,6 +43,13 @@ function Ext1Console(props) {
         socket = _makeSocket()
         store.fetchInfo(props.request.id)
       })
+      .catch(err => {
+        setTimeout(() => {
+          setFetching(false)
+          setVisible(false)
+          store.leaveConsole()
+        }, 100)
+      });
     return () => socket && socket.close()
   }
 

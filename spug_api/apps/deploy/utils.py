@@ -28,12 +28,16 @@ BUILD_DIR = settings.BUILD_DIR
 def dispatch(req, fail_mode=False):
     rds = get_redis_connection()
     rds_key = f'{settings.REQUEST_KEY}:{req.id}'
+    
     if fail_mode:
         req.host_ids = req.fail_host_ids
     req.fail_mode = fail_mode
     req.host_ids = json.loads(req.host_ids)
     req.fail_host_ids = req.host_ids[:]
     helper = Helper.make(rds, rds_key, req.host_ids if fail_mode else None)
+
+    deploy_do_key = f'{settings.DEPLOY_DO_EXEC_KEY}:deploy:{req.deploy.id}'
+    env_do_key = f'{settings.DEPLOY_DO_EXEC_KEY}:env:{req.deploy.env.id}'
 
     try:
         api_token = uuid.uuid4().hex
@@ -79,9 +83,14 @@ def dispatch(req, fail_mode=False):
             docker_image=req.docker_image,
             fail_host_ids=json.dumps(req.fail_host_ids),
         )
+        # 清理 Redis 状态
+        with rds.pipeline() as pipe:
+            pipe.delete(deploy_do_key)
+            pipe.decr(env_do_key)
+            pipe.execute()
         helper.clear()
         Helper.send_deploy_notify(req)
-
+        
 
 def _ext1_deploy(req, helper, env):
     if not req.repository_id:
@@ -275,7 +284,8 @@ def _ext3_deploy(req, helper, env):
         container = ContainerRepository.objects.get(env_id=req.deploy.env_id)
     except ContainerRepository.DoesNotExist:
         container = None  # 或者你可以处理不存在的情况
-        helper.send_info('image', f'\r\n{human_time()} \033[31m[{req.deploy.env_id}]镜像的仓库配置不存在\033[0m{req.deploy.env.env_name}        ')
+        helper.send_info('image', f'\r\n{human_time()} \033[31m[{req.deploy.env.name}]镜像的仓库配置不存在, 请检查容器仓库对应的环境配置是否存在\033[0m        ')
+        raise Exception("镜像的仓库配置不存在, 请检查容器仓库对应的环境配置是否存在")
     except MultipleObjectsReturned:
         # 处理存在多个对象的情况
         helper.send_error('image', f'\033[31m异常x\033[0m\r\n{human_time()} \033[31m镜像仓库配置，存在多条匹配的数据...\033[0m        ')

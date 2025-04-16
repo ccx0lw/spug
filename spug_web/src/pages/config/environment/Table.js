@@ -75,6 +75,7 @@ function ComTable() {
         </div>
       )}/>
       <Table.Column title="标识符" dataIndex="key"/>
+      <Table.Column title="同时发布数量" dataIndex="conc_num"/>
       <Table.Column ellipsis title="描述信息" dataIndex="desc"/>
       {hasPermission('config.env.edit|config.env.del') && (
         <Table.Column title="操作" render={info => (
