@@ -301,7 +301,7 @@ def post_request_ext1(request):
         Argument('deploy_id', type=int, help='参数错误'),
         Argument('name', help='请输入申请标题'),
         Argument('extra', type=list, help='请选择发布版本'),
-        Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
+        # Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
         Argument('type', default='1'),
         Argument('plan', required=False),
         Argument('desc', required=False),
@@ -338,7 +338,8 @@ def post_request_ext1(request):
 
         form.extra = json.dumps(form.extra)
         form.status = '0' if deploy.is_audit else '1'
-        form.host_ids = json.dumps(sorted(form.host_ids))
+        # form.host_ids = json.dumps(sorted(form.host_ids))
+        form.host_ids = deploy.host_ids
         if form.id:
             req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
@@ -356,7 +357,7 @@ def post_request_ext1_rollback(request):
     form, error = JsonParser(
         Argument('request_id', type=int, help='请选择要回滚的版本'),
         Argument('name', help='请输入申请标题'),
-        Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
+        # Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
         Argument('desc', required=False),
     ).parse(request.body)
     
@@ -368,7 +369,8 @@ def post_request_ext1_rollback(request):
             return json_response(error='选择的版本超出了发布配置中设置的版本数量，无法快速回滚，可通过新建发布申请选择构建仓库里的该版本再次发布。')
 
         form.status = '0' if req.deploy.is_audit else '1'
-        form.host_ids = json.dumps(sorted(form.host_ids))
+        # form.host_ids = json.dumps(sorted(form.host_ids))
+        form.host_ids = req.host_ids
         new_req = DeployRequest.objects.create(
             deploy_id=req.deploy_id,
             repository_id=req.repository_id,
@@ -390,7 +392,7 @@ def post_request_ext2(request):
         Argument('id', type=int, required=False),
         Argument('deploy_id', type=int, help='缺少必要参数'),
         Argument('name', help='请输申请标题'),
-        Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
+        # Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
         Argument('extra', type=dict, required=False),
         Argument('version', default=''),
         Argument('type', default='1'),
@@ -411,7 +413,8 @@ def post_request_ext2(request):
             form.spug_version = Repository.make_spug_version(deploy.id)
         form.name = form.name.replace("'", '')
         form.status = '0' if deploy.is_audit else '1'
-        form.host_ids = json.dumps(form.host_ids)
+        # form.host_ids = json.dumps(form.host_ids)
+        form.host_ids = deploy.host_ids
         if form.id:
             req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
@@ -431,7 +434,7 @@ def post_request_ext3(request):
         Argument('deploy_id', type=int, help='参数错误'),
         Argument('name', help='请输入申请标题'),
         Argument('extra', type=list, help='请选择发布版本', default=[]),
-        Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
+        # Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择要部署的主机'),
         Argument('type', default='1'),
         Argument('plan', required=False),
         Argument('desc', required=False),
@@ -485,7 +488,8 @@ def post_request_ext3(request):
 
         form.extra = json.dumps(form.extra)
         form.status = '0' if deploy.is_audit else '1'
-        form.host_ids = json.dumps(sorted(form.host_ids))
+        # form.host_ids = json.dumps(sorted(form.host_ids))
+        form.host_ids = deploy.host_ids
         if form.id:
             req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
