@@ -465,7 +465,7 @@ def post_request_ext3(request):
                     return json_response(error='请选择要发布的镜像版本')
                 dockerImage = DockerImage.objects.get(id=form.extra[1])
                 form.docker_image_id = dockerImage.id
-                form.repository_id = dockerImage.repository.id
+                # form.repository_id = dockerImage.repository.id
                 form.version = dockerImage.version
                 form.spug_version = dockerImage.spug_version
                 form.extra = ['docker_image'] + json.loads(dockerImage.extra)

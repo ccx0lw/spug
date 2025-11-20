@@ -241,22 +241,25 @@ def _ext2_deploy(req, helper, env):
 
 
 def _ext3_deploy(req, helper, env):
-    if not req.repository_id:
-        rep = Repository(
-            app_id=req.deploy.app_id,
-            env_id=req.deploy.env_id,
-            deploy_id=req.deploy_id,
-            version=req.version,
-            spug_version=req.spug_version,
-            extra=req.extra,
-            remarks='SPUG AUTO MAKE',
-            created_by_id=req.created_by_id
-        )
-        build_repository(rep, helper)
-        req.repository = rep
-    else:
-        helper.send_info('local', f'\r\n \033[32m使用构建仓库\033[0m \r\n id:[{req.repository_id}] \r\n 环境:[{req.repository.env.name}] \r\n 版本:[{req.repository.version}] \r\n 创建时间:[{req.repository.created_at}] \r\n 创建人:[{req.repository.created_by.nickname}] \r\n 备注:[{req.repository.remarks}] \r\n \033[32m完成√\033[0m\r\n')
     extras = json.loads(req.extra)
+    
+    if extras[0] != 'docker_image':
+        if not req.repository_id:
+            rep = Repository(
+                app_id=req.deploy.app_id,
+                env_id=req.deploy.env_id,
+                deploy_id=req.deploy_id,
+                version=req.version,
+                spug_version=req.spug_version,
+                extra=req.extra,
+                remarks='SPUG AUTO MAKE',
+                created_by_id=req.created_by_id
+            )
+            build_repository(rep, helper)
+            req.repository = rep
+        else:
+            helper.send_info('local', f'\r\n \033[32m使用构建仓库\033[0m \r\n id:[{req.repository_id}] \r\n 环境:[{req.repository.env.name}] \r\n 版本:[{req.repository.version}] \r\n 创建时间:[{req.repository.created_at}] \r\n 创建人:[{req.repository.created_by.nickname}] \r\n 备注:[{req.repository.remarks}] \r\n \033[32m完成√\033[0m\r\n')
+    
     if extras[0] == 'repository':
         extras = extras[1:]
     if extras[0] == 'branch':
