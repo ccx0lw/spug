@@ -88,7 +88,7 @@ function Index() {
         </SearchForm.Item>
         <SearchForm.Item span={4} style={{textAlign: 'right'}}>
           <AuthButton
-            auth="deploy.request.del"
+            auth="deploy.request.batch_del"
             type="danger"
             icon={<DeleteOutlined/>}
             onClick={() => store.batchVisible = true}>批量删除</AuthButton>

@@ -100,6 +100,7 @@ export default [{
       {key: 'add', label: '新建申请'},
       {key: 'edit', label: '编辑申请'},
       {key: 'del', label: '删除申请'},
+      {key: 'batch_del', label: '批量删除'},
       {key: 'approve', label: '审核申请'},
       {key: 'do', label: '执行发布'}
     ]

@@ -92,7 +92,7 @@ class RequestView(View):
             data.append(tmp)
         return json_response(data)
 
-    @auth('deploy.request.del')
+    @auth('deploy.request.del|deploy.request.batch_del')
     def delete(self, request):
         form, error = JsonParser(
             Argument('id', type=int, required=False),
@@ -100,13 +100,23 @@ class RequestView(View):
             Argument('value', required=False),
         ).parse(request.GET)
         if error is None:
+            # 单个删除：使用 del 权限，只能删除待发布、待审核、已驳回的申请
             if form.id:
+                # 验证单个删除权限
+                if not request.user.has_perms(['deploy.request.del']):
+                    return json_response(error='无删除权限')
                 deploy = DeployRequest.objects.filter(pk=form.id).first()
                 if not deploy or deploy.status not in ('0', '1', '-1'):
                     return json_response(error='未找到指定发布申请或当前状态不允许删除')
                 deploy.delete()
                 return json_response()
 
+            # 批量删除：使用 batch_del 权限
+            if not request.user.has_perms(['deploy.request.batch_del']):
+                return json_response(error='无批量删除权限')
+
+            # 发布申请不允许删除（需要保留，避免发布之后删除导致后续无法追溯）
+            return json_response(error='系统禁止删除')
             count = 0
             if form.mode == 'count':
                 if not str(form.value).isdigit() or int(form.value) < 1:
