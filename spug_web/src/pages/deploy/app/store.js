@@ -40,7 +40,7 @@ class Store {
 
   fetchRecords = () => {
     this.isFetching = true;
-    http.get('/api/app/')
+    return http.get('/api/app/')
       .then(res => {
         const tmp = {};
         for (let item of res) {

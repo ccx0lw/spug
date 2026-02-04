@@ -83,6 +83,8 @@ def dispatch(req, fail_mode=False):
             docker_image=req.docker_image,
             fail_host_ids=json.dumps(req.fail_host_ids),
         )
+        # 需求2: 发布完成后同步更新迭代明细状态
+        _update_iteration_detail_status(req)
         # 清理 Redis 状态
         with rds.pipeline() as pipe:
             pipe.delete(deploy_do_key)
@@ -90,6 +92,79 @@ def dispatch(req, fail_mode=False):
             pipe.execute()
         helper.clear()
         Helper.send_deploy_notify(req)
+
+
+def _update_iteration_detail_status(req):
+    """发布完成后同步更新迭代明细状态和迭代整体状态"""
+    try:
+        from apps.deploy.models import DeployIterationDetail, DeployIteration
+        # 查找关联到这个发布申请的迭代明细
+        details = DeployIterationDetail.objects.filter(request_id=req.id)
+        if details.exists():
+            # 根据发布申请状态更新明细状态
+            # DeployRequest: '-3'失败 '-2'发布异常 '-1'待审核 '0'审核驳回 '1'待发布 '2'发布中 '3'发布成功
+            # DeployIterationDetail: '0'待发布 '1'发布中 '2'发布成功 '3'发布失败
+            if req.status == '3':
+                detail_status = '2'  # 发布成功
+            elif req.status in ['-3', '-2']:
+                detail_status = '3'  # 发布失败
+            elif req.status == '2':
+                detail_status = '1'  # 发布中
+            else:
+                detail_status = '0'  # 待发布
+            
+            iteration_ids = set()
+            for detail in details:
+                detail.status = detail_status
+                detail.save()
+                iteration_ids.add(detail.iteration_id)
+            
+            # 更新迭代的整体状态
+            for iteration_id in iteration_ids:
+                _update_iteration_overall_status(iteration_id)
+    except Exception as e:
+        import logging
+        logging.error(f'更新迭代明细发布状态失败: {e}')
+
+
+def _update_iteration_overall_status(iteration_id):
+    """更新迭代的整体状态"""
+    try:
+        from apps.deploy.models import DeployIterationDetail, DeployIteration
+        iteration = DeployIteration.objects.filter(pk=iteration_id).first()
+        if not iteration:
+            return
+        
+        total_count = iteration.details.count()
+        if total_count == 0:
+            return
+        
+        success_count = iteration.details.filter(status='2').count()
+        failed_count = iteration.details.filter(status='3').count()
+        publishing_count = iteration.details.filter(status='1').count()
+        pending_count = iteration.details.filter(status='0').count()
+        
+        new_status = None
+        if success_count == total_count:
+            # 全部成功
+            new_status = '2'
+        elif failed_count > 0 and pending_count == 0 and publishing_count == 0:
+            # 有失败且没有待发布和发布中的
+            if success_count > 0:
+                new_status = '-1'  # 部分失败
+            else:
+                new_status = '-3'  # 全部失败
+        elif publishing_count > 0:
+            new_status = '1'  # 发布中
+        elif pending_count < total_count and (success_count > 0 or failed_count > 0):
+            new_status = '1'  # 部分已完成，状态为发布中
+        
+        if new_status and iteration.status != new_status:
+            iteration.status = new_status
+            iteration.save()
+    except Exception as e:
+        import logging
+        logging.error(f'更新迭代整体状态失败: {e}')
         
 
 def _ext1_deploy(req, helper, env):

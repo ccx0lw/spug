@@ -7,3 +7,4 @@ migrations/
 /access.log
 /repos/*
 /logs/*
+/spug/overrides.py

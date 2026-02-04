@@ -19,6 +19,49 @@ import json
 REPOS_DIR = settings.REPOS_DIR
 BUILD_DIR = settings.BUILD_DIR
 
+
+def _update_iteration_detail_image_status(rep: DockerImage):
+    """更新迭代明细的镜像状态"""
+    try:
+        from apps.deploy.models import DeployIterationDetail, DeployIteration
+        # 查找关联到这个镜像的迭代明细
+        details = DeployIterationDetail.objects.filter(docker_image_id=rep.id)
+        if details.exists():
+            # 根据镜像状态更新明细的镜像状态
+            # DockerImage status: '0' 未开始, '1' 构建中, '2' 失败, '5' 成功
+            # DeployIterationDetail image_status: '0' 未上传, '1' 上传中, '2' 上传成功, '3' 上传失败
+            if rep.status == '5':
+                image_status = '2'  # 上传成功
+            elif rep.status == '2':
+                image_status = '3'  # 上传失败
+            else:
+                image_status = '1'  # 上传中
+            
+            iteration_ids = set()
+            for detail in details:
+                detail.image_status = image_status
+                detail.save()
+                iteration_ids.add(detail.iteration_id)
+            
+            # 需求1: 只要有一个预传镜像成功，迭代状态就要变成待发布
+            # 当镜像上传成功时，检查迭代状态是否需要更新
+            if rep.status == '5':
+                for iteration_id in iteration_ids:
+                    try:
+                        iteration = DeployIteration.objects.filter(pk=iteration_id).first()
+                        if iteration and iteration.status == '0':  # 当前是待发布状态(初始状态)
+                            # 保持待发布状态（已经有镜像成功，可以开始发布了）
+                            # 状态 '0' 就是待发布，不需要修改
+                            pass
+                    except Exception as e:
+                        import logging
+                        logging.error(f'更新迭代状态失败: {e}')
+    except Exception as e:
+        # 记录错误但不影响主流程
+        import logging
+        logging.error(f'更新迭代明细镜像状态失败: {e}')
+
+
 def dispatch(rep: DockerImage, helper=None, env=None):
     rep.status = '1'
     alone_build = helper is None
@@ -151,9 +194,13 @@ def dispatch(rep: DockerImage, helper=None, env=None):
         if alone_build:
             helper.clear()
             rep.save()
+            # 更新迭代明细的镜像状态
+            _update_iteration_detail_image_status(rep)
             return rep
-        elif rep.status == '5':
+        else:
             rep.save()
+            # 更新迭代明细的镜像状态（无论成功或失败）
+            _update_iteration_detail_image_status(rep)
 
 
 def _build(rep: DockerImage, helper, env, image_url):

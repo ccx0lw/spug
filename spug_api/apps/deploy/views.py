@@ -7,11 +7,12 @@ from django.conf import settings
 from django.http.response import HttpResponseBadRequest
 from django_redis import get_redis_connection
 from libs import json_response, JsonParser, Argument, human_datetime, human_time, auth
-from apps.deploy.models import DeployRequest
+from apps.deploy.models import DeployRequest, DeployIteration, DeployIterationDetail
 from apps.app.models import Deploy, DeployExtend2
 from apps.repository.models import Repository
 from apps.deploy.utils import dispatch, Helper
 from apps.host.models import Host
+from apps.config.models import Environment
 from apps.docker_image.models import DockerImage
 from collections import defaultdict
 from threading import Thread
@@ -533,3 +534,1176 @@ def do_upload(request):
         return json_response(file_name)
     else:
         return HttpResponseBadRequest()
+
+
+class IterationView(View):
+    @auth('deploy.iteration.view')
+    def get(self, request):
+        query = {}
+        if not request.user.is_supper:
+            perms = request.user.deploy_perms
+            query['env_id__in'] = perms['envs']
+        
+        # 如果传入 id 参数，直接返回单个迭代
+        iteration_id = request.GET.get('id')
+        if iteration_id:
+            try:
+                query['id'] = int(iteration_id)
+            except ValueError:
+                return json_response(error='迭代ID格式错误')
+            # 若传入 id，则按该 id 查询，保证后续对 qs 的统一处理
+            qs = DeployIteration.objects.filter(**query)
+        else:
+            # 获取时间范围，默认1个月
+            start_date = request.GET.get('start_date')
+            end_date = request.GET.get('end_date')
+            if (start_date is None or end_date is None or start_date == 'undefined' or end_date == 'undefined'):
+                # 使用默认的30天范围
+                today = datetime.now().date()
+                from datetime import timedelta
+                start_date = (today - timedelta(days=30)).isoformat()
+                end_date = today.isoformat()
+            
+            date_format = "%Y-%m-%d"
+            try:
+                start_date = datetime.strptime(start_date, date_format)
+                end_date = datetime.strptime(end_date, date_format)
+            except ValueError:
+                return json_response(error='日期格式必须是 YYYY-MM-DD')
+
+            if start_date > end_date:
+                return json_response(error='开始日期必须早于结束日期')
+
+            if (end_date - start_date).days > 60:
+                return json_response(error='时间范围不能超过60天')
+            
+            query['created_at_date__range'] = (start_date, end_date)
+            
+            # 按迭代名称搜索
+            name = request.GET.get('name')
+            if name:
+                query['name__icontains'] = name
+            
+            # 按环境搜索
+            env_id = request.GET.get('env_id')
+            qs = DeployIteration.objects.filter(**query)
+            if env_id:
+                qs = qs.filter(details__deploy__env_id=env_id).distinct()
+
+        data = []
+        for item in qs.annotate(
+                env_name=F('env__name'),
+                created_by_user=F('created_by__nickname'),
+                updated_by_user=F('updated_by__nickname')):
+            tmp = item.to_dict()
+            tmp['env_id'] = item.env_id
+            tmp['env_name'] = item.env_name
+            # 获取迭代下的所有发布项
+            details = []
+            env_ids = set()
+            for detail in item.details.all():
+                if detail.deploy and detail.deploy.env_id:
+                    env_ids.add(detail.deploy.env_id)
+                detail_dict = {
+                    'id': detail.id,
+                    'deploy_id': detail.deploy_id,
+                    'app_id': detail.deploy.app_id if detail.deploy else None,
+                    'env_id': detail.deploy.env_id if detail.deploy else None,
+                    'app_name': detail.deploy.app.name if detail.deploy and detail.deploy.app else '',
+                    'env_name': detail.deploy.env.name if detail.deploy and detail.deploy.env else '',
+                    'env_prod': detail.deploy.env.prod if detail.deploy and detail.deploy.env else False,
+                    'version': detail.version,
+                    'sequence': detail.sequence,
+                    'is_container': detail.deploy.extend == '3' if detail.deploy else False,  # 是否容器发布
+                }
+                # 兼容处理：字段可能不存在
+                try:
+                    detail_dict['status'] = detail.status
+                    detail_dict['status_alias'] = detail.get_status_display()
+                    detail_dict['request_id'] = detail.request_id
+                    detail_dict['image_status'] = getattr(detail, 'image_status', '0')
+                    detail_dict['docker_image_id'] = getattr(detail, 'docker_image_id', None)
+                except AttributeError:
+                    detail_dict['status'] = '0'
+                    detail_dict['status_alias'] = '待发布'
+                    detail_dict['request_id'] = None
+                    detail_dict['image_status'] = '0'
+                    detail_dict['docker_image_id'] = None
+                details.append(detail_dict)
+            tmp['details'] = details
+            env_ids_list = sorted(list(env_ids))
+            tmp['env_ids'] = env_ids_list
+            # 按 env_ids 顺序获取环境名称并拼接显示多个环境
+            envs = Environment.objects.filter(id__in=env_ids_list)
+            env_map = {e.id: e.name for e in envs}
+            env_prod_map = {e.id: e.prod for e in envs}  # 环境是否为生产环境
+            env_names = [env_map.get(i, '') for i in env_ids_list]
+            tmp['env_name'] = ','.join([n for n in env_names if n])
+            # 返回每个环境的详细信息（包含是否生产环境）
+            tmp['env_list'] = [{'id': i, 'name': env_map.get(i, ''), 'prod': env_prod_map.get(i, False)} for i in env_ids_list]
+            tmp['status_alias'] = item.get_status_display()
+            # 计算发布项统计：不同应用数量 / 发布项总数
+            app_ids = set([d.get('app_id') for d in details if d.get('app_id')])
+            tmp['publish_apps_count'] = len(app_ids)
+            tmp['publish_total_count'] = len(details)
+            tmp['created_by_user'] = item.created_by_user
+            tmp['updated_by_user'] = item.updated_by_user
+            # 计算已发布数量（发布成功的）- 兼容处理
+            try:
+                published_count = item.details.filter(status='2').count()
+            except Exception:
+                published_count = 0
+            tmp['published_count'] = published_count
+            data.append(tmp)
+        
+        return json_response(data)
+
+    @auth('deploy.iteration.add')
+    def post(self, request):
+        form, error = JsonParser(
+            Argument('name', required=True, help='迭代名称必填'),
+            Argument('env_ids', type=list, required=True, help='环境ID列表必填'),
+            Argument('desc', required=False),
+            Argument('details', type=list, required=True, help='发布项必填'),
+        ).parse(request.body)
+        
+        if error is None:
+            try:
+                # 使用第一个环境作为迭代的主环境
+                main_env_id = form.env_ids[0] if form.env_ids else None
+                if not main_env_id:
+                    return json_response(error='请选择至少一个环境')
+
+                iteration = DeployIteration.objects.create(
+                    name=form.name,
+                    env_id=main_env_id,
+                    desc=form.desc,
+                    status='0',  # 默认设置为待发布
+                    created_by=request.user
+                )
+                
+                # 添加迭代明细 - 根据 app_id 和 env_id 查询对应的 deploy_id
+                from apps.app.models import Deploy
+                for item in form.details:
+                    app_id = item.get('app_id')
+                    env_id = item.get('env_id')
+                    version = item.get('version')
+                    
+                    if not app_id or not env_id:
+                        continue
+                    
+                    # 查找该应用在该环境的部署配置
+                    deploy = Deploy.objects.filter(app_id=app_id, env_id=env_id).first()
+                    if not deploy:
+                        continue
+                    
+                    DeployIterationDetail.objects.create(
+                        iteration=iteration,
+                        deploy_id=deploy.id,
+                        version=version,
+                        sequence=item.get('sequence', 0),
+                        created_by=request.user
+                    )
+                
+                result = iteration.to_dict()
+                result['env_name'] = iteration.env.name
+                result['env_ids'] = form.env_ids
+                result['details'] = []
+                for detail in iteration.details.all():
+                    result['details'].append({
+                        'id': detail.id,
+                        'deploy_id': detail.deploy_id,
+                        'app_id': detail.deploy.app_id if detail.deploy else None,
+                        'env_id': detail.deploy.env_id if detail.deploy else None,
+                        'app_name': detail.deploy.app.name if detail.deploy and detail.deploy.app else '',
+                        'env_name': detail.deploy.env.name if detail.deploy and detail.deploy.env else '',
+                        'version': detail.version,
+                        'sequence': detail.sequence,
+                    })
+                result['status_alias'] = iteration.get_status_display()
+                result['created_by_user'] = request.user.nickname
+                return json_response(result)
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+
+    @auth('deploy.iteration.edit')
+    def put(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, required=True, help='迭代ID必填'),
+            Argument('name', required=True, help='迭代名称必填'),
+            Argument('env_ids', type=list, required=True, help='环境ID列表必填'),
+            Argument('desc', required=False),
+            Argument('details', type=list, required=True, help='发布项必填'),
+            Argument('status', required=False),
+        ).parse(request.body)
+        
+        if error is None:
+            try:
+                iteration = DeployIteration.objects.filter(pk=form.id).first()
+                if not iteration:
+                    return json_response(error='未找到指定迭代')
+                
+                # 只有待发布状态才能编辑
+                if iteration.status != '0':
+                    status_map = {'0': '待发布', '1': '发布中', '2': '发布成功', '-1': '部分失败', '-3': '发布失败'}
+                    return json_response(error=f'当前状态为"{status_map.get(iteration.status, iteration.status)}"，只有待发布状态才能编辑')
+                
+                iteration.name = form.name
+                # 使用第一个环境作为主环境
+                if form.env_ids:
+                    iteration.env_id = form.env_ids[0]
+                iteration.desc = form.desc
+                if form.status:
+                    iteration.status = form.status
+                iteration.updated_by = request.user
+                iteration.save()
+                
+                # 更新迭代明细 - 保留已发布成功的明细，只更新待发布的
+                from apps.app.models import Deploy
+                
+                # 获取已发布成功的明细（不能删除和修改版本）- 兼容处理
+                published_details = {}
+                try:
+                    published_details = {
+                        (d.deploy.app_id, d.deploy.env_id): d 
+                        for d in iteration.details.filter(status='2')
+                    }
+                    # 删除未发布成功的明细
+                    iteration.details.exclude(status='2').delete()
+                except Exception:
+                    # 字段不存在时删除所有明细
+                    iteration.details.all().delete()
+                
+                for item in form.details:
+                    app_id = item.get('app_id')
+                    env_id = item.get('env_id')
+                    version = item.get('version')
+                    
+                    if not app_id or not env_id:
+                        continue
+                    
+                    # 查找该应用在该环境的部署配置
+                    deploy = Deploy.objects.filter(app_id=app_id, env_id=env_id).first()
+                    if not deploy:
+                        continue
+                    
+                    # 检查是否是已发布成功的明细
+                    key = (app_id, env_id)
+                    if key in published_details:
+                        # 只更新 sequence，不修改版本
+                        existing = published_details[key]
+                        existing.sequence = item.get('sequence', 0)
+                        existing.save()
+                    else:
+                        # 创建新的明细
+                        DeployIterationDetail.objects.create(
+                            iteration=iteration,
+                            deploy_id=deploy.id,
+                            version=version,
+                            sequence=item.get('sequence', 0),
+                            created_by=request.user
+                        )
+                
+                result = iteration.to_dict()
+                result['env_name'] = iteration.env.name
+                result['env_ids'] = form.env_ids
+                result['details'] = []
+                for detail in iteration.details.all():
+                    result['details'].append({
+                        'id': detail.id,
+                        'deploy_id': detail.deploy_id,
+                        'app_id': detail.deploy.app_id if detail.deploy else None,
+                        'env_id': detail.deploy.env_id if detail.deploy else None,
+                        'app_name': detail.deploy.app.name if detail.deploy and detail.deploy.app else '',
+                        'env_name': detail.deploy.env.name if detail.deploy and detail.deploy.env else '',
+                        'version': detail.version,
+                        'sequence': detail.sequence,
+                    })
+                result['status_alias'] = iteration.get_status_display()
+                result['created_by_user'] = iteration.created_by.nickname
+                result['updated_by_user'] = request.user.nickname
+                return json_response(result)
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+
+    @auth('deploy.iteration.del')
+    def delete(self, request):
+        form, error = JsonParser(
+            Argument('id', type=int, required=True, help='迭代ID必填')
+        ).parse(request.GET)
+        
+        if error is None:
+            try:
+                iteration = DeployIteration.objects.filter(pk=form.id).first()
+                if not iteration:
+                    return json_response(error='未找到指定迭代')
+                
+                # 只有待发布状态才能删除
+                if iteration.status != '0':
+                    status_map = {'0': '待发布', '1': '发布中', '2': '发布成功', '-1': '已取消', '-3': '发布异常'}
+                    return json_response(error=f'当前状态为"{status_map.get(iteration.status, iteration.status)}"，只有待发布状态才能删除')
+                
+                iteration.delete()
+                return json_response()
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+
+
+class IterationPublishView(View):
+    """迭代按环境发布视图"""
+    
+    @auth('deploy.iteration.do')
+    def post(self, request):
+        """按环境发布"""
+        form, error = JsonParser(
+            Argument('iteration_id', type=int, required=True, help='迭代ID必填'),
+            Argument('env_id', type=int, required=True, help='环境ID必填'),
+        ).parse(request.body)
+        
+        if error is None:
+            try:
+                iteration = DeployIteration.objects.filter(pk=form.iteration_id).first()
+                if not iteration:
+                    return json_response(error='未找到指定迭代')
+                
+                # 获取该环境下的所有待发布项 - 兼容处理
+                try:
+                    details = iteration.details.filter(
+                        deploy__env_id=form.env_id,
+                        status='0'  # 待发布
+                    ).order_by('sequence')
+                except Exception:
+                    # 字段不存在时获取所有该环境的明细
+                    details = iteration.details.filter(
+                        deploy__env_id=form.env_id
+                    ).order_by('sequence')
+                
+                if not details.exists():
+                    return json_response(error='该环境下没有待发布的项目')
+                
+                # 获取环境配置，用于设置并发数
+                env = Environment.objects.filter(pk=form.env_id).first()
+                
+                # 为每个待发布项创建发布申请
+                created_requests = []
+                for detail in details:
+                    # 检查是否已有进行中的发布申请 - 兼容处理
+                    try:
+                        if detail.request_id:
+                            existing_req = DeployRequest.objects.filter(pk=detail.request_id).first()
+                            if existing_req and existing_req.status in ['-1', '0', '1', '2']:  # 待审核、待发布、发布中
+                                continue
+                    except AttributeError:
+                        pass
+                    
+                    deploy = detail.deploy
+                    version = detail.version
+                    
+                    # 根据发布类型构建 extra 字段和关联镜像
+                    # extend: '1' 常规发布, '2' 自定义发布, '3' 容器发布
+                    docker_image_id = None
+                    if deploy.extend == '3':
+                        # 容器发布：检查是否有预传的成功镜像
+                        from apps.docker_image.models import DockerImage
+                        detail_docker_image_id = getattr(detail, 'docker_image_id', None)
+                        detail_image_status = getattr(detail, 'image_status', '0')
+                        
+                        # 只有镜像上传成功（status='2'）且镜像确实存在且成功（status='5'）时才使用镜像
+                        use_prebuilt_image = False
+                        if detail_docker_image_id and detail_image_status == '2':
+                            docker_image = DockerImage.objects.filter(pk=detail_docker_image_id, status='5').first()
+                            if docker_image:
+                                # 有可用的预传镜像，使用镜像方式
+                                docker_image_id = docker_image.id
+                                extra = json.dumps(['docker_image'] + json.loads(docker_image.extra))
+                                spug_version = docker_image.spug_version
+                                use_prebuilt_image = True
+                        
+                        if not use_prebuilt_image:
+                            # 没有可用的预传镜像，使用常规 tag 方式编译（不是 docker_image 方式）
+                            extra = json.dumps(['tag', version, None])
+                            spug_version = Repository.make_spug_version(deploy.id)
+                    else:
+                        # 常规发布/自定义发布: ["tag", "v0.6.3", null]
+                        extra = json.dumps(['tag', version, None])
+                        spug_version = Repository.make_spug_version(deploy.id)
+                    
+                    # 获取 host_ids
+                    host_ids = deploy.host_ids
+                    
+                    # 迭代发布自动审核，状态直接设为待发布
+                    status = '1'  # 待发布（已审核）
+                    
+                    # 创建发布申请
+                    deploy_request = DeployRequest.objects.create(
+                        deploy=deploy,
+                        name=f'迭代：{iteration.name}',
+                        type='1',  # 常规发布
+                        extra=extra,
+                        host_ids=host_ids,
+                        version=version,
+                        spug_version=spug_version,
+                        docker_image_id=docker_image_id,
+                        status='2',  # 直接设置为发布中，自动触发
+                        do_at=human_datetime(),
+                        do_by=request.user,
+                        desc=f'迭代发布: {iteration.name}',
+                        created_by=request.user
+                    )
+                    
+                    # 更新明细状态和关联的发布申请ID - 兼容处理
+                    try:
+                        detail.status = '1'  # 发布中
+                        detail.request_id = deploy_request.id
+                        detail.save()
+                    except Exception:
+                        pass
+                    
+                    # 自动触发发布
+                    from threading import Thread
+                    Thread(target=dispatch, args=(deploy_request, False)).start()
+                    
+                    created_requests.append({
+                        'detail_id': detail.id,
+                        'request_id': deploy_request.id,
+                        'app_name': deploy.app.name
+                    })
+                
+                # 更新迭代状态为发布中
+                iteration.status = '1'  # 发布中
+                iteration.save()
+                
+                return json_response({
+                    'message': f'已创建 {len(created_requests)} 个发布申请',
+                    'requests': created_requests
+                })
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+    
+    @auth('deploy.iteration.view')
+    def get(self, request):
+        """获取迭代发布状态"""
+        form, error = JsonParser(
+            Argument('iteration_id', type=int, required=True, help='迭代ID必填'),
+        ).parse(request.GET)
+        
+        if error is None:
+            try:
+                iteration = DeployIteration.objects.filter(pk=form.iteration_id).first()
+                if not iteration:
+                    return json_response(error='未找到指定迭代')
+                
+                # 按环境分组统计发布状态
+                env_status = {}
+                for detail in iteration.details.all():
+                    if not detail.deploy or not detail.deploy.env_id:
+                        continue
+                    
+                    env_id = detail.deploy.env_id
+                    is_container = detail.deploy.extend == '3'
+                    if env_id not in env_status:
+                        env = detail.deploy.env
+                        env_status[env_id] = {
+                            'env_id': env_id,
+                            'env_name': env.name if env else '',
+                            'is_prod': env.prod if env else False,
+                            'has_container': False,  # 环境是否有容器应用
+                            'total': 0,
+                            'pending': 0,
+                            'publishing': 0,
+                            'success': 0,
+                            'failed': 0,
+                            'image_uploading': 0,  # 镜像上传中数量
+                            'image_success': 0,    # 镜像上传成功数量
+                            'image_failed': 0,     # 镜像上传失败数量
+                            'details': []
+                        }
+                    
+                    # 更新环境是否有容器应用
+                    if is_container:
+                        env_status[env_id]['has_container'] = True
+                    
+                    env_status[env_id]['total'] += 1
+                    # 兼容处理：字段可能不存在
+                    try:
+                        detail_status = detail.status
+                        detail_status_alias = detail.get_status_display()
+                        detail_request_id = detail.request_id
+                        detail_image_status = getattr(detail, 'image_status', '0')
+                        detail_docker_image_id = getattr(detail, 'docker_image_id', None)
+                    except AttributeError:
+                        detail_status = '0'
+                        detail_status_alias = '待发布'
+                        detail_request_id = None
+                        detail_image_status = '0'
+                        detail_docker_image_id = None
+                    
+                    if detail_status == '0':
+                        env_status[env_id]['pending'] += 1
+                    elif detail_status == '1':
+                        env_status[env_id]['publishing'] += 1
+                    elif detail_status == '2':
+                        env_status[env_id]['success'] += 1
+                    elif detail_status == '3':
+                        env_status[env_id]['failed'] += 1
+                    
+                    # 镜像上传状态统计
+                    if detail_image_status == '1':
+                        env_status[env_id]['image_uploading'] += 1
+                    elif detail_image_status == '2':
+                        env_status[env_id]['image_success'] += 1
+                    elif detail_image_status == '3':
+                        env_status[env_id]['image_failed'] += 1
+                    
+                    # 如果有关联的发布申请，获取其状态并同步更新明细状态
+                    request_status = None
+                    request_status_alias = None
+                    if detail_request_id:
+                        req = DeployRequest.objects.filter(pk=detail_request_id).first()
+                        if req:
+                            request_status = req.status
+                            request_status_alias = req.get_status_display()
+                            # 根据发布申请状态同步更新明细状态
+                            # DeployRequest: '-3'失败 '-2'发布异常 '-1'待审核 '0'审核驳回 '1'待发布 '2'发布中 '3'发布成功
+                            # DeployIterationDetail: '0'待发布 '1'发布中 '2'发布成功 '3'发布失败
+                            if req.status == '3':  # 发布成功
+                                if detail_status != '2':
+                                    try:
+                                        detail.status = '2'
+                                        detail.save()
+                                        detail_status = '2'
+                                        detail_status_alias = '发布成功'
+                                    except Exception:
+                                        pass
+                            elif req.status in ['-3', '-2']:  # 发布失败或异常
+                                if detail_status != '3':
+                                    try:
+                                        detail.status = '3'
+                                        detail.save()
+                                        detail_status = '3'
+                                        detail_status_alias = '发布失败'
+                                    except Exception:
+                                        pass
+                            elif req.status == '2':  # 发布中
+                                if detail_status != '1':
+                                    try:
+                                        detail.status = '1'
+                                        detail.save()
+                                        detail_status = '1'
+                                        detail_status_alias = '发布中'
+                                    except Exception:
+                                        pass
+                    
+                    # 获取镜像信息
+                    docker_image_info = None
+                    if detail_docker_image_id:
+                        from apps.docker_image.models import DockerImage
+                        docker_image = DockerImage.objects.filter(pk=detail_docker_image_id).first()
+                        if docker_image:
+                            docker_image_info = {
+                                'id': docker_image.id,
+                                'status': docker_image.status,
+                                'status_alias': docker_image.get_status_display(),
+                                'version': docker_image.version,
+                            }
+                    
+                    env_status[env_id]['details'].append({
+                        'id': detail.id,
+                        'deploy_id': detail.deploy_id,
+                        'app_id': detail.deploy.app_id if detail.deploy else None,
+                        'env_id': detail.deploy.env_id if detail.deploy else None,
+                        'app_name': detail.deploy.app.name if detail.deploy and detail.deploy.app else '',
+                        'version': detail.version,
+                        'status': detail_status,
+                        'status_alias': detail_status_alias,
+                        'request_id': detail_request_id,
+                        'request_status': request_status,
+                        'request_status_alias': request_status_alias,
+                        'sequence': detail.sequence,
+                        'is_container': detail.deploy.extend == '3',  # 是否容器发布
+                        'image_status': detail_image_status,
+                        'image_status_alias': dict(DeployIterationDetail.IMAGE_STATUS_CHOICES).get(detail_image_status, '未上传'),
+                        'docker_image_id': detail_docker_image_id,
+                        'docker_image': docker_image_info,
+                    })
+                
+                # 检查并更新迭代的整体状态
+                # 重新从数据库获取最新的明细状态统计
+                total_details = iteration.details.count()
+                if total_details > 0:
+                    # 统计各状态数量（使用刚刚同步后的最新数据）
+                    try:
+                        # 强制刷新查询
+                        success_count = DeployIterationDetail.objects.filter(iteration=iteration, status='2').count()
+                        failed_count = DeployIterationDetail.objects.filter(iteration=iteration, status='3').count()
+                        pending_count = DeployIterationDetail.objects.filter(iteration=iteration, status='0').count()
+                        publishing_count = DeployIterationDetail.objects.filter(iteration=iteration, status='1').count()
+                        
+                        # 更新迭代状态
+                        new_status = None
+                        if success_count == total_details:
+                            # 全部成功
+                            new_status = '2'
+                        elif failed_count > 0 and pending_count == 0 and publishing_count == 0:
+                            # 有失败且没有待发布和发布中的（全部完成，部分或全部失败）
+                            new_status = '-3'  # 发布异常
+                        elif publishing_count > 0:
+                            # 有正在发布的
+                            new_status = '1'  # 发布中
+                        elif pending_count < total_details and (success_count > 0 or failed_count > 0):
+                            # 部分已完成
+                            new_status = '1'  # 发布中
+                        
+                        if new_status and iteration.status != new_status:
+                            iteration.status = new_status
+                            iteration.save()
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f'更新迭代状态失败: {str(e)}')
+                
+                return json_response(list(env_status.values()))
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+    
+    @auth('deploy.iteration.do')
+    def patch(self, request):
+        """重试单个发布申请"""
+        form, error = JsonParser(
+            Argument('detail_id', type=int, required=True, help='明细ID必填'),
+        ).parse(request.body)
+        
+        if error is None:
+            try:
+                detail = DeployIterationDetail.objects.filter(pk=form.detail_id).first()
+                if not detail:
+                    return json_response(error='未找到指定明细')
+                
+                deploy = detail.deploy
+                
+                # 检查是否有关联的发布申请
+                if not detail.request_id:
+                    return json_response(error='该明细没有关联的发布申请，请先点击发布')
+                
+                deploy_request = DeployRequest.objects.filter(pk=detail.request_id).first()
+                if not deploy_request:
+                    return json_response(error='未找到关联的发布申请')
+                
+                # 检查发布申请状态，只有失败状态才能重试
+                if deploy_request.status not in ['-3', '-2', '0']:  # 失败、异常、审核驳回
+                    status_map = {
+                        '-3': '发布失败',
+                        '-2': '发布异常', 
+                        '-1': '待审核',
+                        '0': '审核驳回',
+                        '1': '待发布',
+                        '2': '发布中',
+                        '3': '发布成功'
+                    }
+                    return json_response(error=f'当前状态为"{status_map.get(deploy_request.status, deploy_request.status)}"，不能重试')
+                
+                # 需求3: 容器服务发布失败重试时，判断是否已成功预传镜像，并与记录匹配
+                if deploy.extend == '3':  # 容器发布
+                    from apps.docker_image.models import DockerImage
+                    
+                    # 获取原发布申请的发布方式
+                    original_extra = json.loads(deploy_request.extra) if deploy_request.extra else []
+                    original_is_image_deploy = original_extra and original_extra[0] == 'docker_image'
+                    
+                    # 检查当前明细是否有成功的预传镜像
+                    has_prebuilt_image = False
+                    prebuilt_image = None
+                    detail_docker_image_id = getattr(detail, 'docker_image_id', None)
+                    detail_image_status = getattr(detail, 'image_status', '0')
+                    
+                    if detail_docker_image_id and detail_image_status == '2':
+                        prebuilt_image = DockerImage.objects.filter(pk=detail_docker_image_id, status='5').first()
+                        if prebuilt_image:
+                            has_prebuilt_image = True
+                    
+                    # 判断是否需要新建发布申请
+                    need_new_request = False
+                    if has_prebuilt_image and not original_is_image_deploy:
+                        # 有成功的预传镜像，但原发布申请是tag发布方式，需要新建镜像发布申请
+                        need_new_request = True
+                    elif not has_prebuilt_image and original_is_image_deploy:
+                        # 原发布是镜像发布，但现在没有可用镜像（可能被删除），需要新建tag发布申请
+                        need_new_request = True
+                    elif has_prebuilt_image and original_is_image_deploy:
+                        # 原发布是镜像发布，检查镜像ID是否匹配
+                        if deploy_request.docker_image_id != detail_docker_image_id:
+                            # 镜像ID不匹配，需要新建发布申请
+                            need_new_request = True
+                    
+                    if need_new_request:
+                        # 创建新的发布申请
+                        iteration = detail.iteration
+                        version = detail.version
+                        
+                        if has_prebuilt_image:
+                            # 使用镜像发布方式
+                            docker_image_id = prebuilt_image.id
+                            extra = json.dumps(['docker_image'] + json.loads(prebuilt_image.extra))
+                            spug_version = prebuilt_image.spug_version
+                        else:
+                            # 使用tag发布方式
+                            docker_image_id = None
+                            extra = json.dumps(['tag', version, None])
+                            spug_version = Repository.make_spug_version(deploy.id)
+                        
+                        # 创建新发布申请
+                        new_request = DeployRequest.objects.create(
+                            deploy=deploy,
+                            name=f'迭代重试：{iteration.name}',
+                            type='1',
+                            extra=extra,
+                            host_ids=deploy.host_ids,
+                            version=version,
+                            spug_version=spug_version,
+                            docker_image_id=docker_image_id,
+                            status='2',  # 发布中
+                            do_at=human_datetime(),
+                            do_by=request.user,
+                            desc=f'迭代发布重试: {iteration.name}',
+                            created_by=request.user
+                        )
+                        
+                        # 更新明细关联的发布申请
+                        detail.request_id = new_request.id
+                        detail.status = '1'  # 发布中
+                        detail.save()
+                        
+                        # 更新迭代状态
+                        if iteration.status not in ['1']:
+                            iteration.status = '1'
+                            iteration.save()
+                        
+                        # 触发发布
+                        from threading import Thread
+                        Thread(target=dispatch, args=(new_request, False)).start()
+                        
+                        return json_response({
+                            'message': '已创建新的发布申请并启动发布' + ('（镜像发布）' if has_prebuilt_image else '（标签发布）'),
+                            'request_id': new_request.id
+                        })
+                
+                # 普通重试逻辑（非容器或不需要新建）
+                deploy_request.status = '2'  # 发布中
+                deploy_request.do_at = human_datetime()
+                deploy_request.do_by = request.user
+                deploy_request.save()
+                
+                # 更新明细状态
+                detail.status = '1'  # 发布中
+                detail.save()
+                
+                # 更新迭代状态为发布中
+                iteration = detail.iteration
+                if iteration.status != '1':
+                    iteration.status = '1'
+                    iteration.save()
+                
+                # 触发发布
+                from threading import Thread
+                Thread(target=dispatch, args=(deploy_request, False)).start()
+                
+                return json_response({
+                    'message': '已重新启动发布',
+                    'request_id': deploy_request.id
+                })
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+
+
+class IterationImageView(View):
+    """迭代镜像预传视图"""
+    
+    @staticmethod
+    def _sequential_build_images(details_data, iteration_name):
+        """按顺序编译镜像，单个失败不影响后续"""
+        from apps.docker_image.models import DockerImage
+        from apps.docker_image.utils import dispatch
+        from apps.deploy.models import DeployIterationDetail
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        for data in details_data:
+            try:
+                detail_id = data['detail_id']
+                docker_image_id = data['docker_image_id']
+                app_name = data['app_name']
+                
+                # 获取镜像记录
+                docker_image = DockerImage.objects.filter(pk=docker_image_id).first()
+                if not docker_image:
+                    logger.error(f'镜像记录不存在: {docker_image_id}')
+                    # 更新明细状态为失败
+                    try:
+                        detail = DeployIterationDetail.objects.filter(pk=detail_id).first()
+                        if detail:
+                            detail.image_status = '3'  # 上传失败
+                            detail.save()
+                    except Exception:
+                        pass
+                    continue
+                
+                # 检查同一 deploy 是否有其他正在构建中的镜像（排除当前镜像）
+                # 同一时间同一个 deploy（同环境、同应用）只能执行一个构建
+                building_image = DockerImage.objects.filter(
+                    deploy_id=docker_image.deploy_id,
+                    status='1'  # 构建中
+                ).exclude(id=docker_image_id).first()
+                
+                if building_image:
+                    logger.warning(f'同一deploy存在构建中的镜像任务，当前任务失败: {app_name} (构建中镜像ID: {building_image.id})')
+                    # 将当前镜像标记为失败
+                    docker_image.status = '2'  # 失败
+                    docker_image.save()
+                    # 更新明细状态为失败
+                    try:
+                        detail = DeployIterationDetail.objects.filter(pk=detail_id).first()
+                        if detail:
+                            detail.image_status = '3'  # 上传失败
+                            detail.save()
+                    except Exception:
+                        pass
+                    continue
+                
+                # 在编译前再次检查是否已有该 deploy_id + version 的成功镜像
+                existing_success_image = DockerImage.objects.filter(
+                    deploy_id=docker_image.deploy_id,
+                    version=docker_image.version,
+                    status='5'  # 成功
+                ).exclude(id=docker_image_id).order_by('-id').first()
+                
+                if existing_success_image:
+                    # 找到已成功的镜像，直接复用
+                    logger.info(f'发现已有成功镜像，直接复用: {app_name} (镜像ID: {existing_success_image.id})')
+                    try:
+                        detail = DeployIterationDetail.objects.filter(pk=detail_id).first()
+                        if detail:
+                            detail.image_status = '2'  # 上传成功
+                            detail.docker_image_id = existing_success_image.id
+                            detail.save()
+                        # 删除当前创建的未使用镜像记录
+                        docker_image.delete()
+                    except Exception as e:
+                        logger.error(f'复用镜像失败: {str(e)}')
+                    continue
+                
+                logger.info(f'开始编译镜像: {app_name} (迭代: {iteration_name})')
+                
+                # 同步执行镜像编译
+                try:
+                    dispatch(docker_image)
+                    logger.info(f'镜像编译成功: {app_name}')
+                except Exception as e:
+                    logger.error(f'镜像编译失败: {app_name}, 错误: {str(e)}')
+                    # dispatch 内部已经设置了状态为 '2' (失败) 并更新了迭代明细状态
+                    # 继续下一个
+                    continue
+                    
+            except Exception as e:
+                logger.error(f'处理镜像任务失败: {str(e)}')
+                continue
+    
+    @auth('deploy.iteration.do')
+    def post(self, request):
+        """预传镜像 - 为指定环境的容器应用创建镜像编译任务"""
+        form, error = JsonParser(
+            Argument('iteration_id', type=int, required=True, help='迭代ID必填'),
+            Argument('env_id', type=int, required=True, help='环境ID必填'),
+        ).parse(request.body)
+        
+        if error is None:
+            try:
+                from apps.docker_image.models import DockerImage
+                from threading import Thread
+                
+                iteration = DeployIteration.objects.filter(pk=form.iteration_id).first()
+                if not iteration:
+                    return json_response(error='未找到指定迭代')
+                
+                # 获取该环境下所有容器发布类型的待发布项
+                details = iteration.details.filter(
+                    deploy__env_id=form.env_id,
+                    deploy__extend='3',  # 容器发布
+                ).order_by('sequence')
+                
+                if not details.exists():
+                    return json_response(error='该环境下没有容器发布类型的项目')
+                
+                created_images = []
+                skipped = []
+                failed = []
+                
+                for detail in details:
+                    try:
+                        deploy = detail.deploy
+                        version = detail.version
+                        app_name = deploy.app.name if deploy and deploy.app else f'应用ID:{detail.deploy_id}'
+                        
+                        # 检查是否已有镜像或正在上传
+                        try:
+                            if detail.image_status in ['1', '2']:  # 上传中或已上传
+                                skipped.append({'app_name': app_name, 'reason': '镜像已上传或正在上传中'})
+                                continue
+                        except AttributeError:
+                            pass
+                        
+                        # 检查是否存在该 deploy_id + version 的成功镜像（可以直接复用）
+                        existing_success_image = DockerImage.objects.filter(
+                            deploy_id=deploy.id,
+                            version=version,
+                            status='5'  # 成功
+                        ).order_by('-id').first()
+                        
+                        if existing_success_image:
+                            # 找到已成功的镜像，直接复用
+                            try:
+                                detail.image_status = '2'  # 上传成功
+                                detail.docker_image_id = existing_success_image.id
+                                detail.save()
+                                skipped.append({'app_name': app_name, 'reason': f'复用已有镜像 (ID:{existing_success_image.id})'})
+                                continue
+                            except Exception:
+                                pass
+                        
+                        # 检查是否存在未完成的编译任务（同一deploy同时只能有一个构建）
+                        building_image = DockerImage.objects.filter(
+                            deploy_id=deploy.id, 
+                            status__in=['0', '1']  # 未开始或构建中
+                        ).order_by('-id').first()
+                        if building_image:
+                            failed.append({'app_name': app_name, 'reason': f'存在构建中的任务(镜像ID:{building_image.id})，同一应用同时只能执行一个构建'})
+                            continue
+                        
+                        # 创建镜像编译任务
+                        extra = ['tag', version, None]
+                        spug_version = DockerImage.make_spug_version(deploy.id)
+                        
+                        docker_image = DockerImage.objects.create(
+                            app_id=deploy.app_id,
+                            env_id=deploy.env_id,
+                            deploy_id=deploy.id,
+                            version=version,
+                            spug_version=spug_version,
+                            url='',
+                            extra=json.dumps(extra),
+                            remarks=f'迭代发布预传: {iteration.name}',
+                            created_by=request.user
+                        )
+                        
+                        # 更新明细的镜像状态
+                        try:
+                            detail.image_status = '1'  # 上传中
+                            detail.docker_image_id = docker_image.id
+                            detail.save()
+                        except Exception:
+                            pass
+                        
+                        created_images.append({
+                            'detail_id': detail.id,
+                            'docker_image_id': docker_image.id,
+                            'app_name': app_name
+                        })
+                    except Exception as e:
+                        # 单个应用失败不影响其他应用
+                        app_name = deploy.app.name if deploy and deploy.app else f'应用ID:{detail.deploy_id}'
+                        failed.append({
+                            'app_name': app_name, 
+                            'reason': str(e)
+                        })
+                        continue
+                
+                # 启动后台线程按顺序编译镜像
+                if created_images:
+                    Thread(target=self._sequential_build_images, args=(created_images, iteration.name)).start()
+                
+                # 点击预传镜像后，将迭代状态改为发布中
+                # 只要有创建任务或有复用镜像，都更新状态
+                has_image_action = len(created_images) > 0 or any('复用已有镜像' in s.get('reason', '') for s in skipped)
+                if has_image_action and iteration.status == '0':  # 只有待发布状态才更新
+                    iteration.status = '1'  # 发布中
+                    iteration.save()
+                
+                result_msg = f'已创建 {len(created_images)} 个镜像编译任务'
+                if skipped:
+                    result_msg += f'，跳过 {len(skipped)} 个'
+                if failed:
+                    result_msg += f'，失败 {len(failed)} 个'
+                
+                return json_response({
+                    'message': result_msg,
+                    'created': created_images,
+                    'skipped': skipped,
+                    'failed': failed
+                })
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+    
+    @auth('deploy.iteration.do')
+    def patch(self, request):
+        """重试单个镜像上传"""
+        form, error = JsonParser(
+            Argument('detail_id', type=int, required=True, help='明细ID必填'),
+        ).parse(request.body)
+        
+        if error is None:
+            try:
+                from apps.docker_image.models import DockerImage
+                from apps.docker_image.utils import dispatch
+                from threading import Thread
+                
+                detail = DeployIterationDetail.objects.filter(pk=form.detail_id).first()
+                if not detail:
+                    return json_response(error='未找到指定明细')
+                
+                deploy = detail.deploy
+                version = detail.version
+                
+                if deploy.extend != '3':
+                    return json_response(error='该应用不是容器发布类型')
+                
+                # 先检查是否已有该 deploy_id + version 的成功镜像
+                existing_success_image = DockerImage.objects.filter(
+                    deploy_id=deploy.id,
+                    version=version,
+                    status='5'  # 成功
+                ).order_by('-id').first()
+                
+                if existing_success_image:
+                    # 找到已成功的镜像，直接复用
+                    detail.image_status = '2'  # 上传成功
+                    detail.docker_image_id = existing_success_image.id
+                    detail.save()
+                    return json_response({
+                        'message': f'已复用已有成功镜像 (ID: {existing_success_image.id})',
+                        'docker_image_id': existing_success_image.id
+                    })
+                
+                # 如果已有镜像记录，检查状态并重新编译
+                if detail.docker_image_id:
+                    docker_image = DockerImage.objects.filter(pk=detail.docker_image_id).first()
+                    if docker_image:
+                        if docker_image.status in ['0', '1']:
+                            return json_response(error='镜像正在编译中，请稍后')
+                        if docker_image.status == '5':
+                            # 镜像已成功，直接更新状态
+                            detail.image_status = '2'  # 上传成功
+                            detail.save()
+                            return json_response({
+                                'message': '镜像已编译成功，无需重试',
+                                'docker_image_id': docker_image.id
+                            })
+                        # 失败状态（'2'），检查同一deploy是否有其他构建中的任务
+                        building_image = DockerImage.objects.filter(
+                            deploy_id=deploy.id,
+                            status__in=['0', '1']  # 未开始或构建中
+                        ).exclude(id=docker_image.id).first()
+                        if building_image:
+                            return json_response(error=f'存在构建中的任务(镜像ID:{building_image.id})，同一应用同时只能执行一个构建')
+                        # 重新编译
+                        docker_image.status = '0'
+                        docker_image.save()
+                        detail.image_status = '1'  # 上传中
+                        detail.save()
+                        Thread(target=dispatch, args=(docker_image,)).start()
+                        return json_response({
+                            'message': '已重新启动镜像编译',
+                            'docker_image_id': docker_image.id
+                        })
+                
+                # 创建新的镜像编译任务前，检查同一deploy是否有构建中的任务
+                building_image = DockerImage.objects.filter(
+                    deploy_id=deploy.id,
+                    status__in=['0', '1']  # 未开始或构建中
+                ).first()
+                if building_image:
+                    return json_response(error=f'存在构建中的任务(镜像ID:{building_image.id})，同一应用同时只能执行一个构建')
+                
+                # 创建新的镜像编译任务
+                extra = ['tag', version, None]
+                spug_version = DockerImage.make_spug_version(deploy.id)
+                
+                docker_image = DockerImage.objects.create(
+                    app_id=deploy.app_id,
+                    env_id=deploy.env_id,
+                    deploy_id=deploy.id,
+                    version=version,
+                    spug_version=spug_version,
+                    url='',
+                    extra=json.dumps(extra),
+                    remarks=f'迭代发布重试: {detail.iteration.name}',
+                    created_by=request.user
+                )
+                
+                detail.image_status = '1'
+                detail.docker_image_id = docker_image.id
+                detail.save()
+                
+                Thread(target=dispatch, args=(docker_image,)).start()
+                
+                return json_response({'message': '已创建镜像编译任务', 'docker_image_id': docker_image.id})
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)
+
+
+class IterationDetailView(View):
+    """迭代详情管理视图 - 更新版本等"""
+    
+    @auth('deploy.iteration.edit')
+    def put(self, request):
+        """更新迭代详情的版本"""
+        form, error = JsonParser(
+            Argument('detail_id', type=int, required=True, help='详情ID必填'),
+            Argument('version', type=str, required=True, help='版本必填'),
+        ).parse(request.body)
+        if error is None:
+            try:
+                detail = DeployIterationDetail.objects.get(pk=form.detail_id)
+                iteration = detail.iteration
+                
+                # 检查迭代状态 - 已完全成功的迭代不允许修改
+                if iteration.status == '2':
+                    return json_response(error='迭代已全部发布成功，无法修改版本')
+                
+                # 检查是否可以修改版本
+                # 如果镜像正在上传中，不允许修改
+                if detail.image_status == '1':
+                    return json_response(error='镜像正在上传中，无法修改版本')
+                
+                # 如果镜像已成功上传，不允许修改
+                if detail.image_status == '2':
+                    return json_response(error='镜像已成功上传，无法修改版本')
+                
+                # 如果发布已成功，不允许修改
+                if detail.status == '2':
+                    return json_response(error='该应用已发布成功，无法修改版本')
+                
+                # 更新版本
+                detail.version = form.version
+                # 重置镜像状态（如果有）
+                if detail.image_status in ['3']:  # 只重置失败状态
+                    detail.image_status = '0'
+                    detail.docker_image_id = None
+                # 重置发布状态（如果是失败状态）
+                if detail.status == '3':
+                    detail.status = '0'
+                    detail.request_id = None
+                detail.save()
+                
+                return json_response({'message': '版本更新成功'})
+            except DeployIterationDetail.DoesNotExist:
+                return json_response(error='详情不存在')
+            except Exception as e:
+                return json_response(error=str(e))
+        return json_response(error=error)

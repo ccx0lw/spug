@@ -97,12 +97,16 @@ class DockerImageView(View):
             
 
             # 容器镜像编译完后必须发布，否则不允许再次编译新的镜像
-            last_success_image = DockerImage.objects.filter(env_id = deploy.env.id, status = '5').order_by('-id').first()
+            last_success_image = DockerImage.objects.filter(deploy_id = deploy.id, status = '5').order_by('-id').first()
             if last_success_image:
                 last_request = DeployRequest.objects.filter(docker_image_id=last_success_image.id).order_by('-id').first()
                 if last_request is None or last_request.status != '3':
                     # 判断最后一个发布申请的状态是否成功
-                    return json_response(error=f'{deploy.env.name}环境上次编译的镜像未发布/成功，请先发布后再编译新的镜像')
+                    return json_response(error=f'{deploy.env.name}环境 {deploy.app.name}应用上次编译的镜像未发布/成功，请先发布后再编译新的镜像')
+            # 同一个应用存在 未开始 构建中 的编译任务时，不允许再次编译
+            building_image = DockerImage.objects.filter(deploy_id = deploy.id, status__in=['0', '1']).order_by('-id').first()
+            if building_image:
+                return json_response(error=f'{deploy.env.name}环境 {deploy.app.name}应用环境存在未完成的编译任务，请稍后再试')
             
             if form.extra[0] != 'repository':
                 form.spug_version = DockerImage.make_spug_version(deploy.id)

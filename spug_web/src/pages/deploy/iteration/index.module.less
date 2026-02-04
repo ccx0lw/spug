@@ -1,0 +1,67 @@
+.min80 {
+  min-width: 80px;
+}
+
+.tableCard {
+  background: #fff;
+  border-radius: 4px;
+  padding: 16px;
+  
+  :global {
+    .ant-table-thead > tr > th {
+      background: #fafafa;
+      font-weight: 600;
+    }
+    
+    .ant-table-row-expand-icon-cell {
+      padding: 0 8px !important;
+    }
+    
+    .ant-table-expanded-row > td {
+      background: #f9f9f9 !important;
+      padding: 12px 24px !important;
+    }
+  }
+}
+
+.expandedTable {
+  background: #fff;
+  border-radius: 4px;
+  
+  :global {
+    .ant-table-thead > tr > th {
+      background: #f0f5ff;
+      font-size: 13px;
+    }
+    
+    .ant-table-tbody > tr > td {
+      padding: 8px 12px;
+    }
+  }
+}
+
+.statusTag {
+  min-width: 60px;
+  text-align: center;
+  border-radius: 4px;
+}
+
+.actionBtn {
+  padding: 0 4px;
+  
+  &:hover {
+    background: #e6f7ff;
+  }
+}
+
+.publishCount {
+  font-weight: 500;
+  
+  .done {
+    color: #52c41a;
+  }
+  
+  .total {
+    color: #1890ff;
+  }
+}

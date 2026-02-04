@@ -14,4 +14,8 @@ urlpatterns = [
     path('request/ext3/', post_request_ext3),
     path('request/upload/', do_upload),
     path('request/<int:r_id>/', RequestDetailView.as_view()),
+    path('iteration/', IterationView.as_view()),
+    path('iteration/publish/', IterationPublishView.as_view()),
+    path('iteration/image/', IterationImageView.as_view()),
+    path('iteration/detail/', IterationDetailView.as_view()),
 ]

@@ -103,6 +103,16 @@ export default [{
       {key: 'approve', label: '审核申请'},
       {key: 'do', label: '执行发布'}
     ]
+  }, {
+    key: 'iteration',
+    label: '迭代发布',
+    perms: [
+      {key: 'view', label: '查看迭代'},
+      {key: 'add', label: '新建迭代'},
+      {key: 'edit', label: '编辑迭代'},
+      {key: 'del', label: '删除迭代'},
+      {key: 'do', label: '执行发布'}
+    ]
   }]
 }, {
   key: 'schedule',

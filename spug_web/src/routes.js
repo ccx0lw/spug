@@ -27,6 +27,7 @@ import DeployApp from './pages/deploy/app';
 import DeployRepository from './pages/deploy/repository';
 import DeployDockerImage from './pages/deploy/docker/images';
 import DeployRequest from './pages/deploy/request';
+import DeployIteration from './pages/deploy/iteration';
 import ScheduleIndex from './pages/schedule';
 import ConfigEnvironment from './pages/config/environment';
 import ConfigService from './pages/config/service';
@@ -63,12 +64,20 @@ export default [
       {title: '文件分发', auth: 'exec.transfer.do', path: '/exec/transfer', component: ExecTransfer},
     ]
   },
+  // 迭代名称、发布环境（按照顺序）  // 提供按钮，  按照发布环境发布 / UAT测试OK，上传镜像（针对生产环境， 弹出确认提示 建议下班之后，否则会影响生产排查问题和紧急发布）
+    // 备注
+
+    // 明细
+    // 序号（按照顺序发布）
+    // 应用
+    // 版本（只能选择tag）
   {
-    icon: <FlagOutlined/>, title: '应用发布', auth: 'deploy.app.view|deploy.repository.view|deploy.request.view|deploy.docker_image.view', child: [
+    icon: <FlagOutlined/>, title: '应用发布', auth: 'deploy.app.view|deploy.repository.view|deploy.request.view|deploy.docker_image.view|deploy.iteration.view', child: [
       {title: '发布配置', auth: 'deploy.app.view', path: '/deploy/app', component: DeployApp},
       {title: '构建仓库', auth: 'deploy.repository.view', path: '/deploy/repository', component: DeployRepository},
       {title: '容器镜像', auth: 'deploy.docker_image.view', path: '/deploy/docker_image', component: DeployDockerImage},
-      {title: '发布申请', auth: 'deploy.request.view', path: '/deploy/request', component: DeployRequest},
+      {title: '发布申请(单个)', auth: 'deploy.request.view', path: '/deploy/request', component: DeployRequest},
+      {title: '迭代发布', auth: 'deploy.iteration.view', path: '/deploy/iteration', component: DeployIteration},
     ]
   },
   {
