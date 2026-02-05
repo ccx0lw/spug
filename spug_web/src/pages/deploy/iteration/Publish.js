@@ -40,27 +40,15 @@ function Publish() {
     // 首次加载
     store.fetchPublishStatus(record.id);
 
-    // 检查是否有正在进行的任务
-    const hasRunningTasks = () => {
-      return publishStatus.some(env => 
-        env.publishing > 0 || env.image_uploading > 0
-      );
-    };
-
     // 设置定时刷新
     const timer = setInterval(() => {
       if (store.publishVisible && record.id) {
         store.fetchPublishStatus(record.id);
-        
-        // 如果没有正在运行的任务，停止定时刷新
-        if (!hasRunningTasks()) {
-          clearInterval(timer);
-        }
       }
-    }, 15000); // 每15秒刷新一次
+    }, 5000); // 每15秒刷新一次
 
     return () => clearInterval(timer);
-  }, [store.publishVisible, record.id, publishStatus]);
+  }, [store.publishVisible, record.id]);
 
 
   const handlePublish = (envId, envName, isProd) => {

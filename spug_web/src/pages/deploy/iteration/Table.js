@@ -93,7 +93,7 @@ function ComTable() {
     {
       title: '创建人',
       dataIndex: 'created_by_user',
-      width: 80,
+      width: 100,
     },
     {
       title: '创建时间',
@@ -257,11 +257,11 @@ function ComTable() {
         dataSource={store.dataSource}
         rowKey="id"
         pagination={{
-          pageSize: 20,
+          pageSize: 100,
           showSizeChanger: true,
           showQuickJumper: true,
           showTotal: total => `共 ${total} 条`,
-          pageSizeOptions: ['10', '20', '50', '100']
+          // pageSizeOptions: ['10', '20', '50', '100']
         }}
         loading={store.isFetching}
         scroll={{ x: 900 }}

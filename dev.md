@@ -51,15 +51,19 @@ python manage.py runserver
 ### 安装前端依赖
 可以把 npm 用 yarn 或 cnpm 代替。
 
-```python
+```bash
 cd spug_web
 npm install #--registry=https://registry.npm.taobao.org
 ```
 
 ### 启动前端
 
-```python
+```bash
 npm start
+```
+#### docker 容器中 开发环境启动
+‵‵‵bash
+node node_modules/react-app-rewired/bin/index.js start
 ```
 
 ### 访问测试

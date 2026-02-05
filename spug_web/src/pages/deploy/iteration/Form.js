@@ -960,14 +960,13 @@ function FormComponent() {
               <Space>
                 <AppstoreOutlined />
                 发布项详情 
-                <Badge count={Object.keys(selectedAppsMap).filter(k => selectedAppsMap[k]?.selected).length} style={{ backgroundColor: '#52c41a' }} overflowCount={999} />
               </Space>
             }
             size="small"
             style={{ borderRadius: 8 }}
             headStyle={{ background: '#fafafa', borderRadius: '8px 8px 0 0' }}
           >
-            {/* 筛选栏 */}
+            {/* 筛选栏 - 固定在顶部 */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -975,7 +974,10 @@ function FormComponent() {
               marginBottom: 12,
               padding: '12px',
               backgroundColor: '#f9f9f9',
-              borderRadius: '6px'
+              borderRadius: '6px',
+              position: 'sticky',
+              top: 0,
+              zIndex: 10
             }}>
               <Input
                 placeholder="搜索应用"
@@ -985,6 +987,7 @@ function FormComponent() {
                 onChange={(e) => setSearchAppName(e.target.value)}
                 prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
               />
+              
               <Tabs
                 activeKey={selectedTag}
                 onChange={(v) => setSelectedTag(v)}
@@ -1008,19 +1011,21 @@ function FormComponent() {
                   type={showMode === 'selected' ? 'primary' : 'default'}
                   onClick={() => setShowMode('selected')}
                 >
-                  已勾选
+                  <Badge count={Object.keys(selectedAppsMap).filter(k => selectedAppsMap[k]?.selected).length} style={{ backgroundColor: '#ff4d4f' }} overflowCount={999}>
+                    已勾选&ensp;&ensp;
+                  </Badge>
                 </Button>
               </Button.Group>
             </div>
 
-            {/* 应用列表 */}
+            {/* 应用列表 - 不分页 */}
             <Table
               columns={detailColumns}
               dataSource={transformedDetails}
               rowKey="key"
-              pagination={transformedDetails.length > 20 ? { pageSize: 20, size: 'small', showTotal: (total) => `共 ${total} 个应用` } : false}
+              pagination={false}
               size="small"
-              scroll={{ x: Math.max(800, allEnvIds.length * 150), y: 400 }}
+              scroll={{ x: Math.max(800, allEnvIds.length * 150) }}
               rowClassName={(record) => record.selected ? 'selected-row' : ''}
             />
           </Card>

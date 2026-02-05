@@ -600,31 +600,45 @@ class IterationView(View):
             if env_id:
                 qs = qs.filter(details__deploy__env_id=env_id).distinct()
 
+        # 使用 prefetch_related 优化查询，避免 N+1 问题
+        from django.db.models import Prefetch
+        qs = qs.select_related('env', 'created_by', 'updated_by').prefetch_related(
+            Prefetch(
+                'details',
+                queryset=DeployIterationDetail.objects.select_related(
+                    'deploy', 'deploy__app', 'deploy__env'
+                )
+            )
+        )
+
         data = []
-        for item in qs.annotate(
-                env_name=F('env__name'),
-                created_by_user=F('created_by__nickname'),
-                updated_by_user=F('updated_by__nickname')):
+        for item in qs:
             tmp = item.to_dict()
             tmp['env_id'] = item.env_id
-            tmp['env_name'] = item.env_name
-            # 获取迭代下的所有发布项
+            tmp['env_name'] = item.env.name if item.env else ''
+            # 获取迭代下的所有发布项（使用已预加载的数据）
             details = []
             env_ids = set()
+            env_map = {}
+            env_prod_map = {}
             for detail in item.details.all():
-                if detail.deploy and detail.deploy.env_id:
-                    env_ids.add(detail.deploy.env_id)
+                deploy = detail.deploy
+                if deploy and deploy.env_id:
+                    env_ids.add(deploy.env_id)
+                    if deploy.env:
+                        env_map[deploy.env_id] = deploy.env.name
+                        env_prod_map[deploy.env_id] = deploy.env.prod
                 detail_dict = {
                     'id': detail.id,
                     'deploy_id': detail.deploy_id,
-                    'app_id': detail.deploy.app_id if detail.deploy else None,
-                    'env_id': detail.deploy.env_id if detail.deploy else None,
-                    'app_name': detail.deploy.app.name if detail.deploy and detail.deploy.app else '',
-                    'env_name': detail.deploy.env.name if detail.deploy and detail.deploy.env else '',
-                    'env_prod': detail.deploy.env.prod if detail.deploy and detail.deploy.env else False,
+                    'app_id': deploy.app_id if deploy else None,
+                    'env_id': deploy.env_id if deploy else None,
+                    'app_name': deploy.app.name if deploy and deploy.app else '',
+                    'env_name': deploy.env.name if deploy and deploy.env else '',
+                    'env_prod': deploy.env.prod if deploy and deploy.env else False,
                     'version': detail.version,
                     'sequence': detail.sequence,
-                    'is_container': detail.deploy.extend == '3' if detail.deploy else False,  # 是否容器发布
+                    'is_container': deploy.extend == '3' if deploy else False,  # 是否容器发布
                 }
                 # 兼容处理：字段可能不存在
                 try:
@@ -643,10 +657,7 @@ class IterationView(View):
             tmp['details'] = details
             env_ids_list = sorted(list(env_ids))
             tmp['env_ids'] = env_ids_list
-            # 按 env_ids 顺序获取环境名称并拼接显示多个环境
-            envs = Environment.objects.filter(id__in=env_ids_list)
-            env_map = {e.id: e.name for e in envs}
-            env_prod_map = {e.id: e.prod for e in envs}  # 环境是否为生产环境
+            # 使用已收集的环境信息，无需再查询
             env_names = [env_map.get(i, '') for i in env_ids_list]
             tmp['env_name'] = ','.join([n for n in env_names if n])
             # 返回每个环境的详细信息（包含是否生产环境）
@@ -656,13 +667,10 @@ class IterationView(View):
             app_ids = set([d.get('app_id') for d in details if d.get('app_id')])
             tmp['publish_apps_count'] = len(app_ids)
             tmp['publish_total_count'] = len(details)
-            tmp['created_by_user'] = item.created_by_user
-            tmp['updated_by_user'] = item.updated_by_user
-            # 计算已发布数量（发布成功的）- 兼容处理
-            try:
-                published_count = item.details.filter(status='2').count()
-            except Exception:
-                published_count = 0
+            tmp['created_by_user'] = item.created_by.nickname if item.created_by else ''
+            tmp['updated_by_user'] = item.updated_by.nickname if item.updated_by else ''
+            # 计算已发布数量（发布成功的）- 使用已加载的数据
+            published_count = sum(1 for d in details if d.get('status') == '2')
             tmp['published_count'] = published_count
             data.append(tmp)
         
@@ -1007,9 +1015,34 @@ class IterationPublishView(View):
                 if not iteration:
                     return json_response(error='未找到指定迭代')
                 
+                # 使用 prefetch_related 预加载所有关联数据
+                details = list(DeployIterationDetail.objects.filter(
+                    iteration=iteration
+                ).select_related(
+                    'deploy', 'deploy__app', 'deploy__env'
+                ))
+                
+                # 批量获取所有关联的发布申请
+                request_ids = [d.request_id for d in details if d.request_id]
+                requests_map = {}
+                if request_ids:
+                    requests_qs = DeployRequest.objects.filter(pk__in=request_ids)
+                    requests_map = {r.id: r for r in requests_qs}
+                
+                # 批量获取所有关联的 Docker 镜像
+                from apps.docker_image.models import DockerImage
+                docker_image_ids = [getattr(d, 'docker_image_id', None) for d in details if getattr(d, 'docker_image_id', None)]
+                docker_images_map = {}
+                if docker_image_ids:
+                    docker_images_qs = DockerImage.objects.filter(pk__in=docker_image_ids)
+                    docker_images_map = {img.id: img for img in docker_images_qs}
+                
+                # 需要更新状态的明细列表
+                details_to_update = []
+                
                 # 按环境分组统计发布状态
                 env_status = {}
-                for detail in iteration.details.all():
+                for detail in details:
                     if not detail.deploy or not detail.deploy.env_id:
                         continue
                     
@@ -1073,46 +1106,33 @@ class IterationPublishView(View):
                     request_status = None
                     request_status_alias = None
                     if detail_request_id:
-                        req = DeployRequest.objects.filter(pk=detail_request_id).first()
+                        req = requests_map.get(detail_request_id)
                         if req:
                             request_status = req.status
                             request_status_alias = req.get_status_display()
                             # 根据发布申请状态同步更新明细状态
                             # DeployRequest: '-3'失败 '-2'发布异常 '-1'待审核 '0'审核驳回 '1'待发布 '2'发布中 '3'发布成功
                             # DeployIterationDetail: '0'待发布 '1'发布中 '2'发布成功 '3'发布失败
-                            if req.status == '3':  # 发布成功
-                                if detail_status != '2':
-                                    try:
-                                        detail.status = '2'
-                                        detail.save()
-                                        detail_status = '2'
-                                        detail_status_alias = '发布成功'
-                                    except Exception:
-                                        pass
-                            elif req.status in ['-3', '-2']:  # 发布失败或异常
-                                if detail_status != '3':
-                                    try:
-                                        detail.status = '3'
-                                        detail.save()
-                                        detail_status = '3'
-                                        detail_status_alias = '发布失败'
-                                    except Exception:
-                                        pass
-                            elif req.status == '2':  # 发布中
-                                if detail_status != '1':
-                                    try:
-                                        detail.status = '1'
-                                        detail.save()
-                                        detail_status = '1'
-                                        detail_status_alias = '发布中'
-                                    except Exception:
-                                        pass
+                            new_detail_status = None
+                            if req.status == '3' and detail_status != '2':
+                                new_detail_status = '2'
+                                detail_status_alias = '发布成功'
+                            elif req.status in ['-3', '-2'] and detail_status != '3':
+                                new_detail_status = '3'
+                                detail_status_alias = '发布失败'
+                            elif req.status == '2' and detail_status != '1':
+                                new_detail_status = '1'
+                                detail_status_alias = '发布中'
+                            
+                            if new_detail_status:
+                                detail.status = new_detail_status
+                                detail_status = new_detail_status
+                                details_to_update.append(detail)
                     
-                    # 获取镜像信息
+                    # 获取镜像信息（从预加载的map中获取）
                     docker_image_info = None
                     if detail_docker_image_id:
-                        from apps.docker_image.models import DockerImage
-                        docker_image = DockerImage.objects.filter(pk=detail_docker_image_id).first()
+                        docker_image = docker_images_map.get(detail_docker_image_id)
                         if docker_image:
                             docker_image_info = {
                                 'id': docker_image.id,
@@ -1141,17 +1161,23 @@ class IterationPublishView(View):
                         'docker_image': docker_image_info,
                     })
                 
-                # 检查并更新迭代的整体状态
-                # 重新从数据库获取最新的明细状态统计
-                total_details = iteration.details.count()
-                if total_details > 0:
-                    # 统计各状态数量（使用刚刚同步后的最新数据）
+                # 批量更新需要同步的明细状态
+                if details_to_update:
                     try:
-                        # 强制刷新查询
-                        success_count = DeployIterationDetail.objects.filter(iteration=iteration, status='2').count()
-                        failed_count = DeployIterationDetail.objects.filter(iteration=iteration, status='3').count()
-                        pending_count = DeployIterationDetail.objects.filter(iteration=iteration, status='0').count()
-                        publishing_count = DeployIterationDetail.objects.filter(iteration=iteration, status='1').count()
+                        DeployIterationDetail.objects.bulk_update(details_to_update, ['status'])
+                    except Exception:
+                        pass
+                
+                # 检查并更新迭代的整体状态
+                # 使用已收集的统计数据，避免再次查询数据库
+                total_details = len(details)
+                if total_details > 0:
+                    try:
+                        # 从 env_status 中汇总统计
+                        success_count = sum(e['success'] for e in env_status.values())
+                        failed_count = sum(e['failed'] for e in env_status.values())
+                        pending_count = sum(e['pending'] for e in env_status.values())
+                        publishing_count = sum(e['publishing'] for e in env_status.values())
                         
                         # 更新迭代状态
                         new_status = None
