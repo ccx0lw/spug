@@ -36,9 +36,6 @@ def dispatch(req, fail_mode=False):
     req.fail_host_ids = req.host_ids[:]
     helper = Helper.make(rds, rds_key, req.host_ids if fail_mode else None)
 
-    deploy_do_key = f'{settings.DEPLOY_DO_EXEC_KEY}:deploy:{req.deploy.id}'
-    env_do_key = f'{settings.DEPLOY_DO_EXEC_KEY}:env:{req.deploy.env.id}'
-
     try:
         api_token = uuid.uuid4().hex
         rds.setex(api_token, 60 * 60, f'{req.deploy.app_id},{req.deploy.env_id}')
@@ -85,11 +82,6 @@ def dispatch(req, fail_mode=False):
         )
         # 需求2: 发布完成后同步更新迭代明细状态
         _update_iteration_detail_status(req)
-        # 清理 Redis 状态
-        with rds.pipeline() as pipe:
-            pipe.delete(deploy_do_key)
-            pipe.decr(env_do_key)
-            pipe.execute()
         helper.clear()
         Helper.send_deploy_notify(req)
 

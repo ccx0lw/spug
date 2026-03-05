@@ -213,32 +213,21 @@ class RequestDetailView(View):
 
         deploy = req.deploy
         env = deploy.env
-        
-        rds, deploy_do_key, env_do_key = get_redis_connection(), f'{settings.DEPLOY_DO_EXEC_KEY}:deploy:{deploy.id}', f'{settings.DEPLOY_DO_EXEC_KEY}:env:{env.id}'
 
-        # 判断当前环境的应用是否在发布中
-        if rds.exists(deploy_do_key):
+        # 直接查询数据库判断发布状态，避免 Redis 与 DB 状态不一致的问题
+        # 判断当前应用是否有正在发布中的申请
+        if DeployRequest.objects.filter(deploy=deploy, status='2').exists():
             return json_response(error='当前应用有一个发布申请正在发布中，请等待上一个发布申请执行结束')
 
         # 如果 env.conc_num <= 0，则不限制最大并发发布数量
         if env.conc_num > 0:
             # 获取当前环境正在发布的数量
-            current_env_count = int(rds.get(env_do_key) or 0)
+            current_env_count = DeployRequest.objects.filter(deploy__env=env, status='2').count()
 
             # 判断是否超过最大并发发布数量
             if current_env_count >= env.conc_num:
                 return json_response(error=f'{env.name}环境 最大同时发布数量{env.conc_num}，请等待前面的发布完成')
 
-        # 设置当前环境正在发布的数量和当前应用正在发布中
-        try:
-            # 使用 Redis 事务保证原子性
-            with rds.pipeline() as pipe:
-                pipe.incr(env_do_key)  # 增加当前环境的发布计数
-                pipe.set(deploy_do_key, 1, ex=10800)  # 设置当前应用正在发布中，设置过期时间为 3 小时
-                pipe.execute()
-        except Exception as e:
-            return json_response(error=f'发布状态redis更新失败: {str(e)}')
-        
         host_ids = req.fail_host_ids if form.mode == 'fail' else req.host_ids
         hosts = Host.objects.filter(id__in=json.loads(host_ids))
         message = f'{human_time()} 等待调度...        '
