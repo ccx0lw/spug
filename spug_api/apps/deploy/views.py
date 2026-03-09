@@ -897,6 +897,7 @@ class IterationPublishView(View):
                 
                 # 为每个待发布项创建发布申请
                 created_requests = []
+                pending_dispatches = []  # 收集需要启动的发布任务
                 for detail in details:
                     # 检查是否已有进行中的发布申请 - 兼容处理
                     try:
@@ -970,9 +971,8 @@ class IterationPublishView(View):
                     except Exception:
                         pass
                     
-                    # 自动触发发布
-                    from threading import Thread
-                    Thread(target=dispatch, args=(deploy_request, False)).start()
+                    # 收集待发布任务，事务提交后统一启动
+                    pending_dispatches.append(deploy_request)
                     
                     created_requests.append({
                         'detail_id': detail.id,
@@ -983,6 +983,10 @@ class IterationPublishView(View):
                 # 更新迭代状态为发布中
                 iteration.status = '1'  # 发布中
                 iteration.save()
+                
+                # 使用 on_commit 确保事务提交后再启动发布线程
+                for req_obj in pending_dispatches:
+                    transaction.on_commit(lambda r=req_obj: Thread(target=dispatch, args=(r, False)).start())
                 
                 return json_response({
                     'message': f'已创建 {len(created_requests)} 个发布申请',
@@ -1308,9 +1312,9 @@ class IterationPublishView(View):
                             iteration.status = '1'
                             iteration.save()
                         
-                        # 触发发布
-                        from threading import Thread
-                        Thread(target=dispatch, args=(new_request, False)).start()
+                        # 使用 on_commit 确保事务提交后再启动发布线程
+                        _new_req = new_request
+                        transaction.on_commit(lambda: Thread(target=dispatch, args=(_new_req, False)).start())
                         
                         return json_response({
                             'message': '已创建新的发布申请并启动发布' + ('（镜像发布）' if has_prebuilt_image else '（标签发布）'),
@@ -1333,9 +1337,9 @@ class IterationPublishView(View):
                     iteration.status = '1'
                     iteration.save()
                 
-                # 触发发布
-                from threading import Thread
-                Thread(target=dispatch, args=(deploy_request, False)).start()
+                # 使用 on_commit 确保事务提交后再启动发布线程
+                _retry_req = deploy_request
+                transaction.on_commit(lambda: Thread(target=dispatch, args=(_retry_req, False)).start())
                 
                 return json_response({
                     'message': '已重新启动发布',
