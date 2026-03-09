@@ -4,6 +4,7 @@
 from django.views.generic import View
 from django.db.models import F
 from django.conf import settings
+from django.db import transaction
 from django.http.response import HttpResponseBadRequest
 from django_redis import get_redis_connection
 from libs import json_response, JsonParser, Argument, human_datetime, human_time, auth
@@ -1548,8 +1549,11 @@ class IterationImageView(View):
                         continue
                 
                 # 启动后台线程按顺序编译镜像
+                # 使用 on_commit 确保事务提交后再启动线程，避免子线程读不到刚写入的 DockerImage 记录
                 if created_images:
-                    Thread(target=self._sequential_build_images, args=(created_images, iteration.name)).start()
+                    _created = created_images[:]
+                    _name = iteration.name
+                    transaction.on_commit(lambda: Thread(target=self._sequential_build_images, args=(_created, _name)).start())
                 
                 # 点击预传镜像后，将迭代状态改为发布中
                 # 只要有创建任务或有复用镜像，都更新状态
@@ -1562,7 +1566,8 @@ class IterationImageView(View):
                 if skipped:
                     result_msg += f'，跳过 {len(skipped)} 个'
                 if failed:
-                    result_msg += f'，失败 {len(failed)} 个'
+                    fail_details = '\n'.join(f'应用[{f["app_name"]}] 错误[{f["reason"]}]' for f in failed)
+                    result_msg += f'，失败 {len(failed)} 个\n{fail_details}'
                 
                 return json_response({
                     'message': result_msg,

@@ -265,7 +265,7 @@ def _build(rep: DockerImage, helper, env, image_url):
             except Exception as e:
                 helper.send_error('image', f'Exception: {e}')
         else:
-            helper.send_step('image', 1, f'{human_time()} {template.name} 模板不存在      ')     
+            helper.send_step('image', 1, f'{human_time()} Dockerfile模板未配置，跳过      ')     
 
         helper.send_step('image', 1, '\033[32m完成√\033[0m\r\n')
         
