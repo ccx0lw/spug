@@ -895,9 +895,19 @@ class IterationPublishView(View):
                 # 获取环境配置，用于设置并发数
                 env = Environment.objects.filter(pk=form.env_id).first()
                 
+                # 计算可用并发槽位
+                if env and env.conc_num > 0:
+                    current_env_count = DeployRequest.objects.filter(deploy__env_id=form.env_id, status='2').count()
+                    available_slots = max(0, env.conc_num - current_env_count)
+                    if available_slots == 0:
+                        return json_response(error=f'{env.name}环境 最大同时发布数量为{env.conc_num}，当前已满，请等待前面的发布完成')
+                else:
+                    available_slots = None  # 不限制
+                
                 # 为每个待发布项创建发布申请
                 created_requests = []
-                pending_dispatches = []  # 收集需要启动的发布任务
+                pending_dispatches = []  # 收集需要立即启动的发布任务
+                dispatched_count = 0
                 for detail in details:
                     # 检查是否已有进行中的发布申请 - 兼容处理
                     try:
@@ -943,8 +953,8 @@ class IterationPublishView(View):
                     # 获取 host_ids
                     host_ids = deploy.host_ids
                     
-                    # 迭代发布自动审核，状态直接设为待发布
-                    status = '1'  # 待发布（已审核）
+                    # 判断是否在并发限制内，可以立即执行
+                    can_dispatch = available_slots is None or dispatched_count < available_slots
                     
                     # 创建发布申请
                     deploy_request = DeployRequest.objects.create(
@@ -956,23 +966,25 @@ class IterationPublishView(View):
                         version=version,
                         spug_version=spug_version,
                         docker_image_id=docker_image_id,
-                        status='2',  # 直接设置为发布中，自动触发
-                        do_at=human_datetime(),
-                        do_by=request.user,
+                        status='2' if can_dispatch else '1',  # 在并发限制内立即发布，否则排队等待
+                        do_at=human_datetime() if can_dispatch else None,
+                        do_by=request.user if can_dispatch else None,
                         desc=f'迭代发布: {iteration.name}',
                         created_by=request.user
                     )
                     
                     # 更新明细状态和关联的发布申请ID - 兼容处理
                     try:
-                        detail.status = '1'  # 发布中
+                        detail.status = '1'  # 发布中（含排队等待）
                         detail.request_id = deploy_request.id
                         detail.save()
                     except Exception:
                         pass
                     
-                    # 收集待发布任务，事务提交后统一启动
-                    pending_dispatches.append(deploy_request)
+                    # 在并发限制内的任务收集起来，事务提交后统一启动
+                    if can_dispatch:
+                        pending_dispatches.append(deploy_request)
+                        dispatched_count += 1
                     
                     created_requests.append({
                         'detail_id': detail.id,
@@ -988,8 +1000,13 @@ class IterationPublishView(View):
                 for req_obj in pending_dispatches:
                     transaction.on_commit(lambda r=req_obj: Thread(target=dispatch, args=(r, False)).start())
                 
+                queued_count = len(created_requests) - len(pending_dispatches)
+                if queued_count > 0:
+                    msg = f'已创建 {len(created_requests)} 个发布申请，{len(pending_dispatches)} 个立即执行，{queued_count} 个排队等待'
+                else:
+                    msg = f'已创建 {len(created_requests)} 个发布申请'
                 return json_response({
-                    'message': f'已创建 {len(created_requests)} 个发布申请',
+                    'message': msg,
                     'requests': created_requests
                 })
             except Exception as e:
@@ -1195,6 +1212,14 @@ class IterationPublishView(View):
                         import logging
                         logging.getLogger(__name__).error(f'更新迭代状态失败: {str(e)}')
                 
+                # 查询状态时触发僵死清理和排队调度（处理进程崩溃/SSH假死等异常场景）
+                try:
+                    from apps.deploy.utils import _try_dispatch_queued_requests
+                    for env_id_key in env_status:
+                        _try_dispatch_queued_requests(iteration, env_id_key)
+                except Exception:
+                    pass
+                
                 return json_response(list(env_status.values()))
             except Exception as e:
                 return json_response(error=str(e))
@@ -1235,6 +1260,13 @@ class IterationPublishView(View):
                         '3': '发布成功'
                     }
                     return json_response(error=f'当前状态为"{status_map.get(deploy_request.status, deploy_request.status)}"，不能重试')
+                
+                # 检查环境并发限制
+                retry_env = deploy.env
+                if retry_env and retry_env.conc_num > 0:
+                    current_env_count = DeployRequest.objects.filter(deploy__env_id=retry_env.id, status='2').count()
+                    if current_env_count >= retry_env.conc_num:
+                        return json_response(error=f'{retry_env.name}环境 最大同时发布数量为{retry_env.conc_num}，当前已满，请等待前面的发布完成')
                 
                 # 需求3: 容器服务发布失败重试时，判断是否已成功预传镜像，并与记录匹配
                 if deploy.extend == '3':  # 容器发布

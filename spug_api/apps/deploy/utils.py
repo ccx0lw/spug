@@ -5,7 +5,7 @@ from django_redis import get_redis_connection
 from django.core.exceptions import MultipleObjectsReturned
 from django.conf import settings
 from django.db import close_old_connections
-from libs.utils import AttrDict, human_time, render_str, render_str_or_empty
+from libs.utils import AttrDict, human_time, human_datetime, render_str, render_str_or_empty
 from apps.host.models import Host
 from apps.config.utils import compose_configs
 from apps.config.models import ContainerRepository, FileTemplate
@@ -82,6 +82,11 @@ def dispatch(req, fail_mode=False):
         )
         # 需求2: 发布完成后同步更新迭代明细状态
         _update_iteration_detail_status(req)
+        # 发布完成后调度同迭代同环境下排队等待的发布任务
+        try:
+            _dispatch_pending_iteration_requests(req)
+        except Exception:
+            pass
         helper.clear()
         Helper.send_deploy_notify(req)
 
@@ -94,7 +99,7 @@ def _update_iteration_detail_status(req):
         details = DeployIterationDetail.objects.filter(request_id=req.id)
         if details.exists():
             # 根据发布申请状态更新明细状态
-            # DeployRequest: '-3'失败 '-2'发布异常 '-1'待审核 '0'审核驳回 '1'待发布 '2'发布中 '3'发布成功
+            # DeployRequest: '-3'发布异常 '-1'已驳回 '0'待审核 '1'待发布 '2'发布中 '3'发布成功
             # DeployIterationDetail: '0'待发布 '1'发布中 '2'发布成功 '3'发布失败
             if req.status == '3':
                 detail_status = '2'  # 发布成功
@@ -157,6 +162,240 @@ def _update_iteration_overall_status(iteration_id):
     except Exception as e:
         import logging
         logging.error(f'更新迭代整体状态失败: {e}')
+        
+
+def _dispatch_pending_iteration_requests(req):
+    """发布完成后，检查并调度同迭代同环境下排队等待的发布申请"""
+    try:
+        from apps.deploy.models import DeployIterationDetail
+        from apps.config.models import Environment
+
+        # 找到关联到这个发布申请的迭代明细
+        detail = DeployIterationDetail.objects.filter(request_id=req.id).first()
+        if not detail:
+            return
+
+        iteration = detail.iteration
+        env_id = req.deploy.env_id
+
+        _try_dispatch_queued_requests(iteration, env_id)
+    except Exception as e:
+        import logging
+        logging.error(f'调度迭代待发布申请失败: {e}')
+
+
+def _cleanup_stale_requests(env_id, stale_minutes=60):
+    """清理僵死的发布申请（超过指定时间仍为发布中状态）
+    处理场景：SSH连接中断、命令假死、进程崩溃/重启导致发布申请卡在 status='2'
+    """
+    from datetime import datetime, timedelta
+    import logging
+    logger = logging.getLogger(__name__)
+
+    threshold = human_datetime(datetime.now() - timedelta(minutes=stale_minutes))
+
+    # 查找超时的迭代发布申请（名称以"迭代"开头的）
+    stale_requests = DeployRequest.objects.filter(
+        deploy__env_id=env_id,
+        status='2',
+        do_at__lt=threshold,
+        name__startswith='迭代'
+    )
+
+    cleaned = 0
+    for stale_req in stale_requests:
+        logger.warning(
+            f'检测到僵死的发布申请: id={stale_req.id}, '
+            f'app={stale_req.deploy.app.name}, do_at={stale_req.do_at}, '
+            f'已超过{stale_minutes}分钟，标记为失败'
+        )
+        stale_req.status = '-3'
+        stale_req.save()
+        # 同步更新迭代明细状态
+        _update_iteration_detail_status(stale_req)
+        cleaned += 1
+
+    if cleaned:
+        logger.info(f'环境 env_id={env_id} 清理了 {cleaned} 个僵死的发布申请')
+    return cleaned
+
+
+def _try_dispatch_queued_requests(iteration, env_id):
+    """尝试调度指定迭代指定环境下排队等待的发布申请，含僵死清理"""
+    from apps.deploy.models import DeployIterationDetail
+    from apps.config.models import Environment
+    from threading import Thread
+    import logging
+    logger = logging.getLogger(__name__)
+
+    env = Environment.objects.filter(pk=env_id).first()
+
+    # 如果 env.conc_num <= 0 则不限制并发，不需要调度
+    if not env or env.conc_num <= 0:
+        return
+
+    # 先清理僵死的发布申请，释放槽位
+    _cleanup_stale_requests(env_id)
+
+    # 计算当前环境可用槽位
+    current_count = DeployRequest.objects.filter(deploy__env_id=env_id, status='2').count()
+    available_slots = env.conc_num - current_count
+    if available_slots <= 0:
+        return
+
+    # 找到同迭代同环境下状态为待发布(status='1')的发布申请，按明细sequence排序
+    pending_details = DeployIterationDetail.objects.filter(
+        iteration=iteration,
+        deploy__env_id=env_id,
+    ).exclude(request_id__isnull=True).order_by('sequence')
+
+    dispatched = 0
+    for pd in pending_details:
+        if dispatched >= available_slots:
+            break
+        if not pd.request_id:
+            continue
+        # 只调度状态为待发布(status='1')的发布申请
+        pending_req = DeployRequest.objects.filter(pk=pd.request_id, status='1').first()
+        if not pending_req:
+            continue
+
+        # 检查同一 deploy 是否有正在发布中的申请
+        if DeployRequest.objects.filter(deploy=pending_req.deploy, status='2').exists():
+            continue
+
+        # 更新发布申请状态为发布中
+        pending_req.status = '2'
+        pending_req.do_at = human_datetime()
+        pending_req.save()
+
+        logger.info(f'调度排队发布申请: id={pending_req.id}, app={pending_req.deploy.app.name}')
+        # 启动发布线程
+        Thread(target=dispatch, args=(pending_req, False)).start()
+        dispatched += 1
+        
+
+def _recover_on_startup():
+    """服务启动时恢复被中断的迭代发布队列
+    处理场景：整个 Spug 服务重启后，之前正在发布中(status='2')的线程已死，排队中(status='1')的任务无人调度。
+    使用 Redis 锁确保多个 gunicorn worker 中只有一个执行恢复。
+    """
+    import logging
+    from apps.deploy.models import DeployIterationDetail, DeployIteration
+    from apps.config.models import Environment
+    from threading import Thread
+    from django.db import close_old_connections
+
+    logger = logging.getLogger(__name__)
+
+    # 使用 Redis 锁确保只有一个进程执行恢复，防止多 worker 重复调度
+    rds = get_redis_connection()
+    lock_key = 'spug:iteration:startup_recovery_lock'
+    # 120秒过期，防止锁意外未释放
+    if not rds.set(lock_key, '1', nx=True, ex=120):
+        logger.info('另一个进程已在执行启动恢复，跳过')
+        return
+
+    try:
+        close_old_connections()
+        logger.info('开始执行迭代发布启动恢复...')
+
+        # 第一步：将所有迭代相关的 status='2'(发布中) 的申请标记为失败
+        # 服务重启后，这些请求的发布线程已经死亡，无法继续执行
+        stuck_requests = DeployRequest.objects.filter(
+            status='2',
+            name__startswith='迭代'
+        )
+        stuck_count = 0
+        affected_iteration_ids = set()
+        for req in stuck_requests:
+            logger.warning(
+                f'启动恢复: 标记被中断的发布申请为失败 id={req.id}, '
+                f'app={req.deploy.app.name}, env={req.deploy.env.name}'
+            )
+            req.status = '-3'
+            req.save()
+            # 同步更新迭代明细状态
+            details = DeployIterationDetail.objects.filter(request_id=req.id)
+            for detail in details:
+                detail.status = '3'  # 发布失败
+                detail.save()
+                affected_iteration_ids.add(detail.iteration_id)
+            stuck_count += 1
+
+        if stuck_count:
+            logger.info(f'启动恢复: 已标记 {stuck_count} 个被中断的发布申请为失败')
+
+        # 更新受影响的迭代整体状态
+        for iteration_id in affected_iteration_ids:
+            _update_iteration_overall_status(iteration_id)
+
+        # 第二步：找到所有有排队中请求(status='1')的迭代，按并发限制重新调度
+        queued_details = DeployIterationDetail.objects.filter(
+            status='1'
+        ).exclude(
+            request_id__isnull=True
+        ).select_related('iteration', 'deploy', 'deploy__env')
+
+        # 按 (iteration_id, env_id) 分组
+        iteration_env_pairs = set()
+        for detail in queued_details:
+            # 确认关联的发布申请确实是待发布状态
+            if detail.request_id:
+                req_exists = DeployRequest.objects.filter(
+                    pk=detail.request_id, status='1'
+                ).exists()
+                if req_exists and detail.deploy:
+                    iteration_env_pairs.add((detail.iteration_id, detail.deploy.env_id))
+
+        dispatched_total = 0
+        for iteration_id, env_id in iteration_env_pairs:
+            iteration = DeployIteration.objects.filter(pk=iteration_id).first()
+            if not iteration:
+                continue
+            env = Environment.objects.filter(pk=env_id).first()
+            if not env or env.conc_num <= 0:
+                # 不限并发，全部调度
+                pending_details = DeployIterationDetail.objects.filter(
+                    iteration=iteration,
+                    deploy__env_id=env_id,
+                ).exclude(request_id__isnull=True).order_by('sequence')
+                for pd in pending_details:
+                    if not pd.request_id:
+                        continue
+                    pending_req = DeployRequest.objects.filter(
+                        pk=pd.request_id, status='1'
+                    ).first()
+                    if not pending_req:
+                        continue
+                    if DeployRequest.objects.filter(
+                        deploy=pending_req.deploy, status='2'
+                    ).exists():
+                        continue
+                    pending_req.status = '2'
+                    pending_req.do_at = human_datetime()
+                    pending_req.save()
+                    logger.info(
+                        f'启动恢复调度: id={pending_req.id}, '
+                        f'app={pending_req.deploy.app.name}'
+                    )
+                    Thread(target=dispatch, args=(pending_req, False)).start()
+                    dispatched_total += 1
+            else:
+                # 有并发限制，使用 _try_dispatch_queued_requests
+                try:
+                    _try_dispatch_queued_requests(iteration, env_id)
+                except Exception as e:
+                    logger.error(f'启动恢复调度失败: iteration={iteration_id}, env={env_id}, error={e}')
+
+        logger.info(f'迭代发布启动恢复完成: 清理了 {stuck_count} 个中断请求，恢复了 {len(iteration_env_pairs)} 组调度')
+    except Exception as e:
+        logger.error(f'启动恢复执行失败: {e}')
+    finally:
+        try:
+            rds.delete(lock_key)
+        except Exception:
+            pass
         
 
 def _ext1_deploy(req, helper, env):
