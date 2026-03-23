@@ -5,8 +5,10 @@ from django.template.defaultfilters import filesizeformat
 from libs.utils import human_datetime, render_str, str_decode
 from libs.spug import Notification
 from apps.host.models import Host
+from paramiko.ssh_exception import SSHException
 from functools import partial
 import subprocess
+import socket
 import json
 import os
 
@@ -289,13 +291,19 @@ class Helper:
             self.send_error('local', f'exit code: {task.returncode}')
 
     def remote(self, key, ssh, command, env=None):
-        code = -1
-        for code, out in ssh.exec_command_with_stream(command, environment=env):
-            self.send_info(key, out)
-        if code != 0:
-            self.send_error(key, f'exit code: {code}')
+        try:
+            code = -1
+            for code, out in ssh.exec_command_with_stream(command, environment=env):
+                self.send_info(key, out)
+            if code != 0:
+                self.send_error(key, f'exit code: {code}')
+        except (SSHException, socket.error, socket.timeout, EOFError, OSError) as e:
+            self.send_error(key, f'SSH连接丢失: {e}，请通过「失败重发」重新发布该主机')
 
     def remote_raw(self, key, ssh, command):
-        code, out = ssh.exec_command_raw(command)
-        if code != 0:
-            self.send_error(key, f'exit code: {code}, {out}')
+        try:
+            code, out = ssh.exec_command_raw(command)
+            if code != 0:
+                self.send_error(key, f'exit code: {code}, {out}')
+        except (SSHException, socket.error, socket.timeout, EOFError, OSError) as e:
+            self.send_error(key, f'SSH连接丢失: {e}，请通过「失败重发」重新发布该主机')

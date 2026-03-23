@@ -8,6 +8,7 @@ from paramiko.ssh_exception import AuthenticationException, SSHException
 from paramiko.py3compat import b, u
 from io import StringIO
 from uuid import uuid4
+import socket
 import time
 import re
 
@@ -51,7 +52,7 @@ AuthHandler._finalize_pubkey_algorithm = _finalize_pubkey_algorithm
 
 class SSH:
     def __init__(self, hostname, port=22, username='root', pkey=None, password=None, default_env=None,
-                 connect_timeout=10, term=None):
+                 connect_timeout=10, term=None, keepalive_interval=60, command_timeout=300):
         self.stdout = None
         self.client = None
         self.channel = None
@@ -60,6 +61,8 @@ class SSH:
         self.term = term or {}
         self.eof = 'Spug EOF 2108111926'
         self.default_env = default_env
+        self.keepalive_interval = keepalive_interval
+        self.command_timeout = command_timeout
         self.regex = re.compile(r'Spug EOF 2108111926 (-?\d+)[\r\n]?')
         self.arguments = {
             'hostname': hostname,
@@ -86,10 +89,39 @@ class SSH:
         self.client = SSHClient()
         self.client.set_missing_host_key_policy(AutoAddPolicy)
         self.client.connect(**self.arguments)
+        transport = self.client.get_transport()
+        if transport:
+            transport.set_keepalive(self.keepalive_interval)
         return self.client
 
     def ping(self):
         return True
+
+    def reconnect(self):
+        """关闭并重新建立 SSH 连接，重置 channel/sftp 状态。"""
+        try:
+            if self.client:
+                self.client.close()
+        except Exception:
+            pass
+        self.client = None
+        self.channel = None
+        self.sftp = None
+        self.exec_file = None
+        self.stdout = None
+        self.get_client()
+        transport = self.client.get_transport()
+        if transport and 'windows' in transport.remote_version.lower():
+            self.exec_command = self.exec_command_raw
+            self.exec_command_with_stream = self._win_exec_command_with_stream
+
+    def is_connected(self):
+        """检查 SSH 连接是否仍然活跃。"""
+        try:
+            transport = self.client.get_transport() if self.client else None
+            return transport is not None and transport.is_active()
+        except Exception:
+            return False
 
     def add_public_key(self, public_key):
         command = f'mkdir -p -m 700 ~/.ssh && \
@@ -101,10 +133,20 @@ class SSH:
 
     def exec_command_raw(self, command, environment=None):
         channel = self.client.get_transport().open_session()
+        channel.settimeout(self.command_timeout)
         if environment:
             channel.update_environment(environment)
         channel.set_combine_stderr(True)
         channel.exec_command(command)
+        # 轮询等待退出状态，避免连接断开时无限阻塞
+        start_time = time.time()
+        while not channel.exit_status_ready():
+            if time.time() - start_time > self.command_timeout:
+                if not self.is_connected():
+                    raise SSHException('SSH connection lost while waiting for command to complete')
+                # 连接仍然活跃，命令还在执行，重置计时器
+                start_time = time.time()
+            time.sleep(0.5)
         code, output = channel.recv_exit_status(), channel.recv(-1)
         return code, self._decode(output)
 
@@ -140,11 +182,21 @@ class SSH:
     def exec_command_with_stream(self, command, environment=None):
         channel = self._get_channel()
         command = self._handle_command(command, environment)
+        channel.settimeout(self.command_timeout)
         channel.sendall(command)
         exit_code, line = -1, ''
         while True:
-            line = self._decode(channel.recv(8196))
+            try:
+                line = self._decode(channel.recv(8196))
+            except socket.timeout:
+                # recv 超时，检查连接是否仍然活跃
+                if not self.is_connected():
+                    raise SSHException(f'SSH connection lost (no data received for {self.command_timeout}s)')
+                # 连接仍然活跃，命令还在执行（只是暂时没有输出），继续等待
+                continue
             if not line:
+                if not self.is_connected():
+                    raise SSHException('SSH connection lost unexpectedly')
                 break
             match = self.regex.search(line)
             if match:
