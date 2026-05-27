@@ -213,10 +213,6 @@ function FormComponent() {
     setSelectedEnvIds(newEnvIds);
   };
 
-  const handleRemoveDetail = (key) => {
-    setDetails(details.filter(d => d.key !== key));
-  };
-
   // 切换某个应用在某个环境的选中状态
   const handleToggleEnv = (appId, appName, envId, checked) => {
     // 先基于当前 details 计算新的 details，确保同步更新 selectedAppsMap
@@ -293,12 +289,13 @@ function FormComponent() {
         // 找到该应用对应的 deployId，用于检查前端缓存
         const _cacheDeployId = findDeployId(appId, selectedEnvIds);
         const _hasCached = !!(_cacheDeployId && _deployVersionCache[_cacheDeployId]);
-        next[appId] = next[appId] || { selected: true, version: '', availableVersions: [], loading: !_hasCached };
-        next[appId].selected = true;
-        if (!next[appId].selectedOrder) {
+        const base = next[appId] || { selected: true, version: '', availableVersions: [], loading: !_hasCached };
+        let selectedOrder = base.selectedOrder;
+        if (!selectedOrder) {
           const existing = Object.values(next).map(x => x && x.selectedOrder).filter(Boolean);
-          next[appId].selectedOrder = existing.length ? Math.max(...existing) + 1 : 1;
+          selectedOrder = existing.length ? Math.max(...existing) + 1 : 1;
         }
+        next[appId] = { ...base, selected: true, selectedOrder };
         // 防抖：如有定时器先清除
         if (fetchDebounceTimers.current[appId]) {
           clearTimeout(fetchDebounceTimers.current[appId]);
