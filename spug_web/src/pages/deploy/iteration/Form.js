@@ -21,10 +21,6 @@ function FormComponent() {
   const nameInputRef = useRef(null);
   const [details, setDetails] = useState(store.record?.details || []);
   const [selectedEnvIds, setSelectedEnvIds] = useState(store.record?.env_ids || []);
-  const [selectedAppId, setSelectedAppId] = useState(undefined);
-  const [selectedVersion, setSelectedVersion] = useState(undefined);
-  const [availableVersions, setAvailableVersions] = useState([]);
-  const [versionLoading, setVersionLoading] = useState(false);
   const [tagList, setTagList] = useState([]);
   const [selectedTag, setSelectedTag] = useState('ALL');
   const [selectedAppsMap, setSelectedAppsMap] = useState({});
@@ -38,7 +34,7 @@ function FormComponent() {
   // 监听弹框显示，每次打开都重新加载数据
   useEffect(() => {
     if (!store.formVisible) return;
-    
+
     setInitLoading(true);
     const loadData = async () => {
       try {
@@ -58,21 +54,21 @@ function FormComponent() {
         }
 
         // 确保有应用数据，如果没有则重新加载
-        let appsToLoad = Array.isArray(deployStore.records) 
-          ? deployStore.records 
+        let appsToLoad = Array.isArray(deployStore.records)
+          ? deployStore.records
           : Object.values(deployStore.records || {});
-        
+
         if (appsToLoad.length === 0) {
           console.warn('应用列表为空，重新加载');
           const retryResult = deployStore.fetchRecords();
           if (retryResult instanceof Promise) {
             await retryResult;
           }
-          appsToLoad = Array.isArray(deployStore.records) 
-            ? deployStore.records 
+          appsToLoad = Array.isArray(deployStore.records)
+            ? deployStore.records
             : Object.values(deployStore.records || {});
         }
-          
+
         const appPromises = appsToLoad.map(app => {
           if (!app.isLoaded) {
             return deployStore.loadDeploys(app.id);
@@ -96,6 +92,7 @@ function FormComponent() {
 
         // 编辑模式下恢复状态
         if (isEdit && store.record?.env_ids) {
+
           const editEnvIds = store.record.env_ids;
           setSelectedEnvIds(editEnvIds);
 
@@ -191,90 +188,6 @@ function FormComponent() {
     loadData();
   }, [store.formVisible]);
 
-  // 当环境选择改变时，重新加载版本
-  useEffect(() => {
-    if (selectedAppId) {
-      handleAppChange(selectedAppId);
-    }
-  }, [selectedEnvIds]);
-
-  // 当选择应用时，加载第一个环境的版本
-  const handleAppChange = async (appId) => {
-    setSelectedAppId(appId);
-    setSelectedVersion(undefined);
-    setAvailableVersions([]);
-    
-    if (!appId || !selectedEnvIds || selectedEnvIds.length === 0) return;
-
-    // 获取第一个环境
-    const firstEnvId = selectedEnvIds[0];
-    
-    setVersionLoading(true);
-    
-    try {
-      // 从 deployStore 中查找该应用在该环境的部署配置
-      let deployId = null;
-      
-      // deployStore.records 可能是数组或对象
-      const appsArray = Array.isArray(deployStore.records) 
-        ? deployStore.records 
-        : Object.values(deployStore.records || {});
-      
-      for (const app of appsArray) {
-        if (app.deploys && Array.isArray(app.deploys)) {
-          const deploy = app.deploys.find(d => d.env_id === firstEnvId && d.app_id === appId);
-          if (deploy) {
-            deployId = deploy.id;
-            break;
-          }
-        }
-      }
-
-      if (!deployId) {
-        message.warning('该应用在选定环境中没有部署配置');
-        setVersionLoading(false);
-        return;
-      }
-
-      // 获取版本列表
-      const response = await http.get(`/api/app/deploy/${deployId}/versions/`);
-      
-      // 响应结构是 { data: {...}, error: '' }
-      if (response.error) {
-        message.error(response.error);
-        setVersionLoading(false);
-        return;
-      }
-      
-      // 从 response.data 中获取 tags
-      const responseData = response.data || response;
-      let tags = responseData.tags || {};
-      
-      // tags 是一个对象，key 是标签名（如 v1.0.3），value 是提交信息
-      // 构建版本列表，包含完整的信息
-      const versionList = Object.entries(tags).map(([name, info]) => ({
-        name,
-        id: info.id,
-        author: info.author,
-        date: info.date,
-        message: info.message
-      }));
-      
-      if (versionList.length > 0) {
-        setAvailableVersions(versionList);
-        // 自动选择最新版本的名称（第一个）
-        setSelectedVersion(versionList[0].name);
-      } else {
-        message.warning('未找到可用版本');
-      }
-    } catch (error) {
-      console.error('获取版本失败:', error);
-      message.error(error.message || '获取版本失败');
-    } finally {
-      setVersionLoading(false);
-    }
-  };
-
   const removeEnv = (envId) => {
     const newEnvIds = selectedEnvIds.filter(id => id !== envId);
     setSelectedEnvIds(newEnvIds);
@@ -298,61 +211,6 @@ function FormComponent() {
     const [env] = newEnvIds.splice(fromIndex, 1);
     newEnvIds.splice(toIndex, 0, env);
     setSelectedEnvIds(newEnvIds);
-  };
-
-  const handleAddDetail = () => {
-    if (!selectedAppId) {
-      message.error('请选择应用');
-      return;
-    }
-
-    if (!selectedVersion) {
-      message.error('请选择版本');
-      return;
-    }
-
-    // 获取应用名称
-    const app = apps.find(a => a.id === selectedAppId);
-    if (!app) return;
-
-    // 为每个选中的环境都添加该应用，但仅限于该应用在该环境有部署配置的环境
-    const appsArray = Array.isArray(deployStore.records) 
-      ? deployStore.records 
-      : Object.values(deployStore.records || {});
-    
-    const newDetails = [];
-    selectedEnvIds.forEach((envId, idx) => {
-      // 检查该环境是否有该应用的部署配置
-      const hasDeploy = appsArray.some(
-        app => app.deploys?.some(d => d.app_id === selectedAppId && d.env_id === envId)
-      );
-
-      if (!hasDeploy) {
-        return; // 跳过没有部署配置的环境
-      }
-
-      // 检查是否已经添加过这个应用在这个环境
-      if (!details.some(d => d.app_id === selectedAppId && d.env_id === envId)) {
-        newDetails.push({
-          app_id: selectedAppId,
-          env_id: envId,
-          app_name: app.name,
-          version: selectedVersion,
-          sequence: (details.length + idx + 1),
-          key: `${Date.now()}_${envId}`
-        });
-      }
-    });
-
-    if (newDetails.length === 0) {
-      message.warning('该应用在所有环境中都已添加或无部署配置');
-      return;
-    }
-
-    setDetails([...details, ...newDetails]);
-    setSelectedAppId(undefined);
-    setSelectedVersion(undefined);
-    message.success(`成功添加 ${newDetails.length} 条记录`);
   };
 
   const handleRemoveDetail = (key) => {
@@ -388,18 +246,12 @@ function FormComponent() {
 
       // 自动将该应用标记为已选并防抖拉取版本
       setSelectedAppsMap(prev => {
-        const next = { ...prev };
-        if (!next[appId]) {
-          next[appId] = { selected: true, version: '', availableVersions: [], loading: true };
-        } else {
-          next[appId].selected = true;
-          next[appId].loading = true;
-        }
-        if (!next[appId].selectedOrder) {
-          const existing = Object.values(next).map(x => x && x.selectedOrder).filter(Boolean);
-          next[appId].selectedOrder = existing.length ? Math.max(...existing) + 1 : 1;
-        }
-        return next;
+        const existing = Object.values(prev).map(x => x && x.selectedOrder).filter(Boolean);
+        const nextOrder = prev[appId]?.selectedOrder || (existing.length ? Math.max(...existing) + 1 : 1);
+        return {
+          ...prev,
+          [appId]: { ...(prev[appId] || {}), selected: true, loading: true, selectedOrder: nextOrder }
+        };
       });
 
       // 使用与 handleToggleApp 相同的防抖逻辑
@@ -518,6 +370,14 @@ function FormComponent() {
     }));
   };
 
+  // 将 loading 重置为 false（所有失败路径的统一出口）
+  const _resetLoading = (appId, fetchKey) => {
+    setSelectedAppsMap(prev => {
+      if (!prev[appId] || prev[appId].fetchKey !== fetchKey) return prev;
+      return { ...prev, [appId]: { ...prev[appId], loading: false } };
+    });
+  };
+
   // fetchVersionsForApp：带前端缓存 + raceKey 防异步覆盖
   const fetchVersionsForApp = async (appId, appName, fetchKey) => {
     if (!selectedEnvIds || selectedEnvIds.length === 0) return;
@@ -525,12 +385,7 @@ function FormComponent() {
     const deployId = findDeployId(appId, selectedEnvIds);
     if (!deployId) {
       message.error(`${appName} 在所有发布环境中都没有部署配置，无法获取版本`);
-      setSelectedAppsMap(prev => {
-        if (prev[appId]?.fetchKey === fetchKey) {
-          return { ...prev, [appId]: { ...(prev[appId] || {}), selected: true, availableVersions: [], version: '', loading: false } };
-        }
-        return prev;
-      });
+      _resetLoading(appId, fetchKey);
       return;
     }
 
@@ -538,39 +393,34 @@ function FormComponent() {
     if (_deployVersionCache[deployId]) {
       const versionList = _deployVersionCache[deployId];
       setSelectedAppsMap(prev => {
-        if (prev[appId]?.fetchKey === fetchKey) {
-          const next = { ...prev, [appId]: { ...(prev[appId] || {}), selected: true, availableVersions: versionList, version: prev[appId]?.version || versionList[0]?.name || '', loading: false } };
-          setDetails(prevDetails => prevDetails.map(d => d.app_id === appId && !d.version ? { ...d, version: next[appId].version } : d));
-          return next;
-        }
-        return prev;
+        if (prev[appId]?.fetchKey !== fetchKey) return prev;
+        const merged = { ...(prev[appId] || {}), selected: true, availableVersions: versionList, version: prev[appId]?.version || versionList[0]?.name || '', loading: false };
+        setDetails(prevDetails => prevDetails.map(d => d.app_id === appId && !d.version ? { ...d, version: merged.version } : d));
+        return { ...prev, [appId]: merged };
       });
       return;
     }
 
-    setVersionLoading(true);
     try {
       const response = await http.get(`/api/app/deploy/${deployId}/versions/`);
       if (response.error) {
         message.error(response.error);
+        _resetLoading(appId, fetchKey);
         return;
       }
       const versionList = parseVersionList(response);
       // 写入前端缓存
       _deployVersionCache[deployId] = versionList;
       setSelectedAppsMap(prev => {
-        if (prev[appId]?.fetchKey === fetchKey) {
-          const next = { ...prev, [appId]: { ...(prev[appId] || {}), selected: true, availableVersions: versionList, version: prev[appId]?.version || versionList[0]?.name || '', loading: false } };
-          setDetails(prevDetails => prevDetails.map(d => d.app_id === appId && !d.version ? { ...d, version: next[appId].version } : d));
-          return next;
-        }
-        return prev;
+        if (prev[appId]?.fetchKey !== fetchKey) return prev;
+        const merged = { ...(prev[appId] || {}), selected: true, availableVersions: versionList, version: prev[appId]?.version || versionList[0]?.name || '', loading: false };
+        setDetails(prevDetails => prevDetails.map(d => d.app_id === appId && !d.version ? { ...d, version: merged.version } : d));
+        return { ...prev, [appId]: merged };
       });
     } catch (error) {
       console.error('获取版本失败:', error);
       message.error('获取版本失败');
-    } finally {
-      setVersionLoading(false);
+      _resetLoading(appId, fetchKey);
     }
   };
 
@@ -823,14 +673,17 @@ function FormComponent() {
         }
         if (!Array.isArray(map.availableVersions) || map.availableVersions.length === 0) {
           return (
-            <Button 
-              type="link" 
-              size="small" 
+            <Button
+              type="link"
+              size="small"
               onClick={() => {
-                // 点击时重新获取版本
-                const appName = record.app_name;
-                const appId = record.app_id;
-                fetchVersionsForApp(appId, appName);
+                const { app_id: appId, app_name: appName } = record;
+                const fetchKey = Date.now() + '_' + Math.random();
+                setSelectedAppsMap(prev => prev[appId]
+                  ? { ...prev, [appId]: { ...prev[appId], loading: true, fetchKey } }
+                  : prev
+                );
+                fetchVersionsForApp(appId, appName, fetchKey);
               }}
               style={{ padding: 0 }}
             >
@@ -851,7 +704,13 @@ function FormComponent() {
             onDropdownVisibleChange={(open) => {
               // 下拉框打开时，如果版本列表为空，自动获取
               if (open && (!map.availableVersions || map.availableVersions.length === 0)) {
-                fetchVersionsForApp(record.app_id, record.app_name);
+                const { app_id: appId, app_name: appName } = record;
+                const fetchKey = Date.now() + '_' + Math.random();
+                setSelectedAppsMap(prev => prev[appId]
+                  ? { ...prev, [appId]: { ...prev[appId], loading: true, fetchKey } }
+                  : prev
+                );
+                fetchVersionsForApp(appId, appName, fetchKey);
               }
             }}
           >
@@ -914,9 +773,6 @@ function FormComponent() {
         store.record = {};
         setDetails([]);
         setSelectedEnvIds([]);
-        setSelectedAppId(undefined);
-        setSelectedVersion(undefined);
-        setAvailableVersions([]);
       }}
       onOk={handleOk}
       width={1200}
