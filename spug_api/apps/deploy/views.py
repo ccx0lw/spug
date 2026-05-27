@@ -920,7 +920,11 @@ class IterationPublishView(View):
                     
                     deploy = detail.deploy
                     version = detail.version
-                    
+
+                    # 校验版本不能为空（迭代创建时若加载未完成可能存储了空字符串）
+                    if not version:
+                        return json_response(error=f'应用【{deploy.app.name}】未设置发布版本，请先编辑迭代并选择版本后再发布')
+
                     # 根据发布类型构建 extra 字段和关联镜像
                     # extend: '1' 常规发布, '2' 自定义发布, '3' 容器发布
                     docker_image_id = None
@@ -968,7 +972,7 @@ class IterationPublishView(View):
                         docker_image_id=docker_image_id,
                         status='2' if can_dispatch else '1',  # 在并发限制内立即发布，否则排队等待
                         do_at=human_datetime() if can_dispatch else None,
-                        do_by=request.user if can_dispatch else None,
+                        do_by=request.user or iteration.created_by,  # 优先取点击发布的人，取不到则取迭代创建者
                         desc=f'迭代发布: {iteration.name}',
                         created_by=request.user
                     )

@@ -249,13 +249,23 @@ def get_info(request, deploy_id):
 
 @auth('deploy.app.config|deploy.repository.add|deploy.request.add|deploy.request.edit')
 def get_versions(request, d_id):
+    from django.core.cache import cache
     deploy = Deploy.objects.filter(pk=d_id).first()
     if not deploy:
         return json_response(error='未找到指定应用')
     if deploy.extend == '2':
         return json_response(error='该应用不支持此操作')
+    # 强制刷新参数：?refresh=1 时跳过缓存重新拉取
+    force_refresh = request.GET.get('refresh') == '1'
+    cache_key = f'app_versions_{d_id}'
+    if not force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return json_response(cached)
     branches, tags = fetch_versions(deploy)
-    return json_response({'branches': branches, 'tags': tags})
+    result = {'branches': branches, 'tags': tags}
+    cache.set(cache_key, result, 60)    # 缓存 1 分钟
+    return json_response(result)
 
 
 @auth('deploy.app.config|deploy.app.edit')
