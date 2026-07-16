@@ -4,8 +4,8 @@
 from django_redis import get_redis_connection
 from django.core.exceptions import MultipleObjectsReturned
 from django.conf import settings
-from django.db import close_old_connections
-from libs.utils import AttrDict, human_time, human_datetime, render_str, render_str_or_empty
+from django.db import close_old_connections, transaction
+from libs.utils import AttrDict, human_time, human_datetime, parse_time, render_str, render_str_or_empty
 from apps.host.models import Host
 from apps.config.utils import compose_configs
 from apps.config.models import ContainerRepository, FileTemplate
@@ -17,12 +17,85 @@ from apps.docker_image.models import DockerImage
 from apps.docker_image.utils import dispatch as build_docker_image
 from concurrent import futures
 from functools import partial
+from datetime import datetime, timedelta
 import json
 import uuid
 import os
 
 REPOS_DIR = settings.REPOS_DIR
 BUILD_DIR = settings.BUILD_DIR
+
+
+def lock_deploy_and_get_running_request(deploy_id):
+    """锁定应用在指定环境的发布配置，并返回当前正在发布的申请。
+
+    调用方必须处于数据库事务中，所有发布入口通过同一行锁串行化“检查+启动”。
+    """
+    from apps.app.models import Deploy
+
+    deploy = Deploy.objects.select_for_update().select_related('app', 'env').filter(
+        pk=deploy_id
+    ).first()
+    if not deploy:
+        return None, None
+    # 使用锁定读获取最新已提交状态，避免 MySQL 事务快照读取到旧数据。
+    running_request = DeployRequest.objects.select_for_update().filter(
+        deploy_id=deploy_id,
+        status='2',
+    ).only('id').first()
+    return deploy, running_request
+
+
+def get_running_deploy_error(deploy):
+    return f'应用【{deploy.app.name}】在【{deploy.env.name}】环境正在发布，请等待当前发布完成'
+
+
+def get_deploy_retry_info(req, now=None):
+    """返回环境级发布失败重试窗口信息。"""
+    now = now or datetime.now()
+    env = req.deploy.env
+    retry_hours = getattr(env, 'deploy_retry_hours', 24)
+    info = {
+        'retry_allowed': False,
+        'retry_deadline': None,
+        'retry_hours': retry_hours,
+        'retry_error': '',
+    }
+
+    if req.status not in ('-3', '-2'):
+        info['retry_error'] = '当前发布申请不是失败状态，不能重试'
+        return info
+    if retry_hours <= 0:
+        info['retry_error'] = f'环境【{env.name}】已禁止发布失败后重试'
+        return info
+
+    failed_time = None
+    for value in (getattr(req, 'failed_at', None), req.do_at, req.created_at):
+        if not value:
+            continue
+        try:
+            failed_time = parse_time(value)
+            break
+        except (TypeError, ValueError):
+            continue
+    if failed_time is None:
+        info['retry_error'] = '无法确定发布失败时间，不能重试'
+        return info
+
+    deadline = failed_time + timedelta(hours=retry_hours)
+    info['retry_deadline'] = human_datetime(deadline)
+    if now <= deadline:
+        info['retry_allowed'] = True
+    else:
+        info['retry_error'] = (
+            f'发布失败重试有效期为{retry_hours}小时，已于{info["retry_deadline"]}过期'
+        )
+    return info
+
+
+def get_deploy_retry_error(req, now=None):
+    info = get_deploy_retry_info(req, now=now)
+    return '' if info['retry_allowed'] else info['retry_error']
 
 
 def dispatch(req, fail_mode=False):
@@ -94,74 +167,123 @@ def dispatch(req, fail_mode=False):
 def _update_iteration_detail_status(req):
     """发布完成后同步更新迭代明细状态和迭代整体状态"""
     try:
-        from apps.deploy.models import DeployIterationDetail, DeployIteration
+        from apps.deploy.models import DeployIterationDetail
         # 查找关联到这个发布申请的迭代明细
         details = DeployIterationDetail.objects.filter(request_id=req.id)
         if details.exists():
-            # 根据发布申请状态更新明细状态
-            # DeployRequest: '-3'发布异常 '-1'已驳回 '0'待审核 '1'待发布 '2'发布中 '3'发布成功
-            # DeployIterationDetail: '0'待发布 '1'发布中 '2'发布成功 '3'发布失败
-            if req.status == '3':
-                detail_status = '2'  # 发布成功
-            elif req.status in ['-3', '-2']:
-                detail_status = '3'  # 发布失败
-            elif req.status == '2':
-                detail_status = '1'  # 发布中
-            else:
-                detail_status = '0'  # 待发布
-            
-            iteration_ids = set()
-            for detail in details:
-                detail.status = detail_status
-                detail.save()
-                iteration_ids.add(detail.iteration_id)
+            detail_status = get_iteration_detail_status(req.status)
+            if detail_status is None:
+                return
+
+            iteration_ids = set(details.values_list('iteration_id', flat=True))
+            details.update(status=detail_status)
             
             # 更新迭代的整体状态
             for iteration_id in iteration_ids:
-                _update_iteration_overall_status(iteration_id)
+                update_iteration_overall_status(iteration_id)
     except Exception as e:
         import logging
         logging.error(f'更新迭代明细发布状态失败: {e}')
 
 
-def _update_iteration_overall_status(iteration_id):
+def get_iteration_detail_status(request_status):
+    """将发布申请状态转换为迭代明细状态。"""
+    if request_status == '3':
+        return '2'
+    if request_status in ('-3', '-2'):
+        return '3'
+    if request_status in ('1', '2'):
+        return '1'
+    if request_status in ('-1', '0'):
+        return '0'
+    return None
+
+
+def reconcile_iteration_detail_statuses(details):
+    """以发布申请为准校准迭代明细，补偿发布完成后的偶发同步失败。"""
+    from apps.deploy.models import DeployIterationDetail
+
+    details = list(details)
+    request_ids = {detail.request_id for detail in details if detail.request_id}
+    if not request_ids:
+        return set()
+
+    request_statuses = dict(DeployRequest.objects.filter(
+        pk__in=request_ids
+    ).values_list('id', 'status'))
+    details_to_update = []
+    iteration_ids = set()
+    for detail in details:
+        request_status = request_statuses.get(detail.request_id)
+        expected_status = get_iteration_detail_status(request_status)
+        if expected_status is None or detail.status == expected_status:
+            continue
+        detail.status = expected_status
+        details_to_update.append(detail)
+        iteration_ids.add(detail.iteration_id)
+
+    if not details_to_update:
+        return set()
+
+    DeployIterationDetail.objects.bulk_update(details_to_update, ['status'])
+    for iteration_id in iteration_ids:
+        update_iteration_overall_status(iteration_id)
+    return iteration_ids
+
+
+def get_iteration_overall_status(detail_statuses):
+    """根据全部明细状态计算迭代主状态；全部待发布时保持当前主状态。"""
+    detail_statuses = list(detail_statuses)
+    total_count = len(detail_statuses)
+    if total_count == 0:
+        return None
+
+    success_count = detail_statuses.count('2')
+    failed_count = detail_statuses.count('3')
+    publishing_count = detail_statuses.count('1')
+    pending_count = detail_statuses.count('0')
+
+    if success_count == total_count:
+        return '2'
+    if failed_count > 0 and pending_count == 0 and publishing_count == 0:
+        return '-1' if success_count > 0 else '-3'
+    if publishing_count > 0:
+        return '1'
+    if pending_count < total_count and (success_count > 0 or failed_count > 0):
+        return '1'
+    return None
+
+
+def get_iteration_detail_remove_error(detail):
+    """返回迭代明细不可移除的原因，允许移除时返回 None。"""
+    if detail.request_id:
+        return '该应用已关联发布申请，不能从迭代中移除'
+    if detail.status != '0':
+        return '只有待发布的应用才能从迭代中移除'
+    if detail.image_status != '0' or detail.docker_image_id:
+        return '该应用已开始预传镜像，不能从迭代中移除'
+    return None
+
+
+def update_iteration_overall_status(iteration_id):
     """更新迭代的整体状态"""
     try:
-        from apps.deploy.models import DeployIterationDetail, DeployIteration
+        from apps.deploy.models import DeployIteration
         iteration = DeployIteration.objects.filter(pk=iteration_id).first()
         if not iteration:
             return
-        
-        total_count = iteration.details.count()
-        if total_count == 0:
-            return
-        
-        success_count = iteration.details.filter(status='2').count()
-        failed_count = iteration.details.filter(status='3').count()
-        publishing_count = iteration.details.filter(status='1').count()
-        pending_count = iteration.details.filter(status='0').count()
-        
-        new_status = None
-        if success_count == total_count:
-            # 全部成功
-            new_status = '2'
-        elif failed_count > 0 and pending_count == 0 and publishing_count == 0:
-            # 有失败且没有待发布和发布中的
-            if success_count > 0:
-                new_status = '-1'  # 部分失败
-            else:
-                new_status = '-3'  # 全部失败
-        elif publishing_count > 0:
-            new_status = '1'  # 发布中
-        elif pending_count < total_count and (success_count > 0 or failed_count > 0):
-            new_status = '1'  # 部分已完成，状态为发布中
+
+        detail_statuses = iteration.details.values_list('status', flat=True)
+        new_status = get_iteration_overall_status(detail_statuses)
         
         if new_status and iteration.status != new_status:
             iteration.status = new_status
             iteration.save()
+        return new_status or iteration.status
     except Exception as e:
         import logging
         logging.error(f'更新迭代整体状态失败: {e}')
+        return None
         
 
 def _dispatch_pending_iteration_requests(req):
@@ -328,7 +450,7 @@ def _recover_on_startup():
 
         # 更新受影响的迭代整体状态
         for iteration_id in affected_iteration_ids:
-            _update_iteration_overall_status(iteration_id)
+            update_iteration_overall_status(iteration_id)
 
         # 第二步：找到所有有排队中请求(status='1')的迭代，按并发限制重新调度
         queued_details = DeployIterationDetail.objects.filter(

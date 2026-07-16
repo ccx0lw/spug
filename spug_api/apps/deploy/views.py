@@ -11,7 +11,18 @@ from libs import json_response, JsonParser, Argument, human_datetime, human_time
 from apps.deploy.models import DeployRequest, DeployIteration, DeployIterationDetail
 from apps.app.models import Deploy, DeployExtend2
 from apps.repository.models import Repository
-from apps.deploy.utils import dispatch, Helper
+from apps.deploy.utils import (
+    dispatch,
+    Helper,
+    get_iteration_detail_status,
+    get_iteration_detail_remove_error,
+    get_iteration_overall_status,
+    get_deploy_retry_error,
+    get_deploy_retry_info,
+    get_running_deploy_error,
+    lock_deploy_and_get_running_request,
+    reconcile_iteration_detail_statuses,
+)
 from apps.host.models import Host
 from apps.config.models import Environment
 from apps.docker_image.models import DockerImage
@@ -601,8 +612,21 @@ class IterationView(View):
             )
         )
 
+        items = list(qs)
+        all_details = []
+        for item in items:
+            all_details.extend(item.details.all())
+        affected_iteration_ids = reconcile_iteration_detail_statuses(all_details)
+        if affected_iteration_ids:
+            iteration_statuses = dict(DeployIteration.objects.filter(
+                pk__in=affected_iteration_ids
+            ).values_list('id', 'status'))
+            for item in items:
+                if item.id in iteration_statuses:
+                    item.status = iteration_statuses[item.id]
+
         data = []
-        for item in qs:
+        for item in items:
             tmp = item.to_dict()
             tmp['env_id'] = item.env_id
             tmp['env_name'] = item.env.name if item.env else ''
@@ -1036,6 +1060,9 @@ class IterationPublishView(View):
                 ).select_related(
                     'deploy', 'deploy__app', 'deploy__env'
                 ))
+
+                # 发布申请是状态源，先校准明细再统计，避免本次响应继续返回旧的“发布中”状态
+                reconcile_iteration_detail_statuses(details)
                 
                 # 批量获取所有关联的发布申请
                 request_ids = [d.request_id for d in details if d.request_id]
@@ -1100,6 +1127,31 @@ class IterationPublishView(View):
                         detail_image_status = '0'
                         detail_docker_image_id = None
                     
+                    # 如果有关联的发布申请，获取其状态并同步更新明细状态
+                    request_status = None
+                    request_status_alias = None
+                    request_retry_allowed = False
+                    request_retry_deadline = None
+                    request_retry_error = ''
+                    if detail_request_id:
+                        req = requests_map.get(detail_request_id)
+                        if req:
+                            request_status = req.status
+                            request_status_alias = req.get_status_display()
+                            retry_info = get_deploy_retry_info(req)
+                            request_retry_allowed = retry_info['retry_allowed']
+                            request_retry_deadline = retry_info['retry_deadline']
+                            request_retry_error = retry_info['retry_error']
+                            expected_detail_status = get_iteration_detail_status(req.status)
+                            if expected_detail_status and expected_detail_status != detail_status:
+                                detail.status = expected_detail_status
+                                detail_status = expected_detail_status
+                                detail_status_alias = dict(
+                                    DeployIterationDetail.STATUS_CHOICES
+                                ).get(expected_detail_status, detail_status_alias)
+                                details_to_update.append(detail)
+
+                    # 必须在发布申请状态校准之后统计，保证本次响应的汇总和明细一致
                     if detail_status == '0':
                         env_status[env_id]['pending'] += 1
                     elif detail_status == '1':
@@ -1116,33 +1168,6 @@ class IterationPublishView(View):
                         env_status[env_id]['image_success'] += 1
                     elif detail_image_status == '3':
                         env_status[env_id]['image_failed'] += 1
-                    
-                    # 如果有关联的发布申请，获取其状态并同步更新明细状态
-                    request_status = None
-                    request_status_alias = None
-                    if detail_request_id:
-                        req = requests_map.get(detail_request_id)
-                        if req:
-                            request_status = req.status
-                            request_status_alias = req.get_status_display()
-                            # 根据发布申请状态同步更新明细状态
-                            # DeployRequest: '-3'失败 '-2'发布异常 '-1'待审核 '0'审核驳回 '1'待发布 '2'发布中 '3'发布成功
-                            # DeployIterationDetail: '0'待发布 '1'发布中 '2'发布成功 '3'发布失败
-                            new_detail_status = None
-                            if req.status == '3' and detail_status != '2':
-                                new_detail_status = '2'
-                                detail_status_alias = '发布成功'
-                            elif req.status in ['-3', '-2'] and detail_status != '3':
-                                new_detail_status = '3'
-                                detail_status_alias = '发布失败'
-                            elif req.status == '2' and detail_status != '1':
-                                new_detail_status = '1'
-                                detail_status_alias = '发布中'
-                            
-                            if new_detail_status:
-                                detail.status = new_detail_status
-                                detail_status = new_detail_status
-                                details_to_update.append(detail)
                     
                     # 获取镜像信息（从预加载的map中获取）
                     docker_image_info = None
@@ -1183,38 +1208,11 @@ class IterationPublishView(View):
                     except Exception:
                         pass
                 
-                # 检查并更新迭代的整体状态
-                # 使用已收集的统计数据，避免再次查询数据库
-                total_details = len(details)
-                if total_details > 0:
-                    try:
-                        # 从 env_status 中汇总统计
-                        success_count = sum(e['success'] for e in env_status.values())
-                        failed_count = sum(e['failed'] for e in env_status.values())
-                        pending_count = sum(e['pending'] for e in env_status.values())
-                        publishing_count = sum(e['publishing'] for e in env_status.values())
-                        
-                        # 更新迭代状态
-                        new_status = None
-                        if success_count == total_details:
-                            # 全部成功
-                            new_status = '2'
-                        elif failed_count > 0 and pending_count == 0 and publishing_count == 0:
-                            # 有失败且没有待发布和发布中的（全部完成，部分或全部失败）
-                            new_status = '-3'  # 发布异常
-                        elif publishing_count > 0:
-                            # 有正在发布的
-                            new_status = '1'  # 发布中
-                        elif pending_count < total_details and (success_count > 0 or failed_count > 0):
-                            # 部分已完成
-                            new_status = '1'  # 发布中
-                        
-                        if new_status and iteration.status != new_status:
-                            iteration.status = new_status
-                            iteration.save()
-                    except Exception as e:
-                        import logging
-                        logging.getLogger(__name__).error(f'更新迭代状态失败: {str(e)}')
+                # 使用统一规则更新迭代主状态，避免发布查询和后台同步出现不同结果
+                new_status = get_iteration_overall_status([detail.status for detail in details])
+                if new_status and iteration.status != new_status:
+                    iteration.status = new_status
+                    iteration.save()
                 
                 # 查询状态时触发僵死清理和排队调度（处理进程崩溃/SSH假死等异常场景）
                 try:
