@@ -18,7 +18,8 @@ import {
   CloudUploadOutlined,
   SyncOutlined,
   CloudServerOutlined,
-  EditOutlined
+  EditOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { http } from 'libs';
@@ -27,11 +28,13 @@ import store from './store';
 function Publish() {
   const record = store.record;
   const publishStatus = store.publishStatus || [];
+  const iterationDetailCount = publishStatus.reduce((sum, env) => sum + env.total, 0);
   const [uploadingEnv, setUploadingEnv] = useState(null);
   const [retryingDetail, setRetryingDetail] = useState(null);
   const [editingVersion, setEditingVersion] = useState(null);  // 正在编辑版本的 detail id
   const [versionOptions, setVersionOptions] = useState({});    // 版本选项缓存 {detailId: versions}
   const [versionLoading, setVersionLoading] = useState(null);  // 正在加载版本的 detail id
+  const [removingDetail, setRemovingDetail] = useState(null);
 
   // 自动刷新状态
   useEffect(() => {
@@ -187,6 +190,31 @@ function Publish() {
     } catch (error) {
       message.error(error.message || '更新版本失败');
     }
+  };
+
+  const handleRemoveDetail = (detailId, appName) => {
+    Modal.confirm({
+      title: '从迭代中移除应用',
+      icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+      content: `确认移除应用【${appName}】？该操作只允许用于未预传镜像且仍待发布的应用。`,
+      okText: '确认移除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => {
+        setRemovingDetail(detailId);
+        return store.removeIterationDetail(detailId)
+          .then(res => {
+            message.success(res.message || `应用【${appName}】已移除`);
+          })
+          .catch(err => {
+            message.error(err.message || '移除应用失败');
+            return Promise.reject(err);
+          })
+          .finally(() => {
+            setRemovingDetail(null);
+          });
+      },
+    });
   };
 
   const getStatusIcon = (status) => {
@@ -356,21 +384,47 @@ function Publish() {
       ),
     },
     {
-      title: '发布申请',
+      title: '操作',
       dataIndex: 'request_id',
-      width: 100,
-      render: (requestId) => requestId ? (
-        <Link to={`/deploy/request?id=${requestId}`}>
-          <Button type="link" size="small" icon={<EyeOutlined />}>
-            查看
-          </Button>
-        </Link>
-      ) : '-',
+      width: 160,
+      render: (requestId, detail) => {
+        const canRemove = detail.status === '0'
+          && detail.image_status === '0'
+          && !detail.docker_image_id
+          && !requestId
+          && iterationDetailCount > 1;
+        if (!requestId && !canRemove) return '-';
+        return (
+          <Space size={4}>
+            {requestId && (
+              <Link to={`/deploy/request?id=${requestId}`}>
+                <Button type="link" size="small" icon={<EyeOutlined />}>
+                  查看
+                </Button>
+              </Link>
+            )}
+            {canRemove && (
+              <Tooltip title="移除未预传镜像且待发布的应用">
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={removingDetail === detail.id}
+                  onClick={() => handleRemoveDetail(detail.id, detail.app_name)}
+                >
+                  移除
+                </Button>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
   // 计算总体进度
-  const totalItems = publishStatus.reduce((sum, env) => sum + env.total, 0);
+  const totalItems = iterationDetailCount;
   const successItems = publishStatus.reduce((sum, env) => sum + env.success, 0);
   const overallProgress = totalItems > 0 ? Math.round((successItems / totalItems) * 100) : 0;
 

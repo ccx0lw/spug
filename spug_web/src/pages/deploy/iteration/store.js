@@ -217,5 +217,18 @@ class Store {
       version: version
     });
   };
+
+  // 移除尚未开始镜像预传或发布的应用
+  removeIterationDetail = (detailId) => {
+    return http.delete('/api/deploy/iteration/detail/', {
+      params: { detail_id: detailId }
+    }).then(res => {
+      if (this.record.id) {
+        this.fetchPublishStatus(this.record.id);
+      }
+      this.fetchRecords();
+      return res;
+    });
+  };
 }
 export default new Store()

@@ -1490,12 +1490,12 @@ class IterationImageView(View):
                 from apps.docker_image.models import DockerImage
                 from threading import Thread
                 
-                iteration = DeployIteration.objects.filter(pk=form.iteration_id).first()
+                iteration = DeployIteration.objects.select_for_update().filter(pk=form.iteration_id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
                 
                 # 获取该环境下所有容器发布类型的待发布项
-                details = iteration.details.filter(
+                details = iteration.details.select_for_update().filter(
                     deploy__env_id=form.env_id,
                     deploy__extend='3',  # 容器发布
                 ).order_by('sequence')
@@ -1775,3 +1775,52 @@ class IterationDetailView(View):
             except Exception as e:
                 return json_response(error=str(e))
         return json_response(error=error)
+
+    @auth('deploy.iteration.do')
+    def delete(self, request):
+        """移除尚未开始镜像预传或发布的迭代明细。"""
+        form, error = JsonParser(
+            Argument('detail_id', type=int, required=True, help='详情ID必填'),
+        ).parse(request.GET)
+        if error is not None:
+            return json_response(error=error)
+
+        try:
+            detail_snapshot = DeployIterationDetail.objects.filter(pk=form.detail_id).only(
+                'iteration_id'
+            ).first()
+            if not detail_snapshot:
+                return json_response(error='详情不存在')
+
+            with transaction.atomic():
+                iteration = DeployIteration.objects.select_for_update().get(
+                    pk=detail_snapshot.iteration_id
+                )
+                detail = DeployIterationDetail.objects.select_for_update().select_related(
+                    'deploy', 'deploy__app'
+                ).filter(pk=form.detail_id, iteration=iteration).first()
+                if not detail:
+                    return json_response(error='详情不存在或已被移除')
+                remove_error = get_iteration_detail_remove_error(detail)
+                if remove_error:
+                    return json_response(error=remove_error)
+                if iteration.details.count() <= 1:
+                    return json_response(error='迭代至少需要保留一个应用')
+
+                app_name = detail.deploy.app.name if detail.deploy and detail.deploy.app else ''
+                detail.delete()
+                remaining_statuses = iteration.details.values_list('status', flat=True)
+                new_status = get_iteration_overall_status(remaining_statuses)
+                if new_status and iteration.status != new_status:
+                    iteration.status = new_status
+                    iteration.save()
+                iteration_status = new_status or iteration.status
+
+            return json_response({
+                'message': f'应用【{app_name}】已从迭代中移除',
+                'iteration_status': iteration_status,
+            })
+        except DeployIteration.DoesNotExist:
+            return json_response(error='迭代不存在')
+        except Exception as e:
+            return json_response(error=str(e))
