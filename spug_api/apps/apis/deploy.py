@@ -2,15 +2,24 @@
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
 from django.http.response import HttpResponseBadRequest, HttpResponseForbidden, HttpResponse
+from django.db import transaction
 from apps.setting.utils import AppSetting
-from apps.deploy.models import Deploy, DeployRequest
+from apps.deploy.models import DeployRequest
 from apps.repository.models import Repository
-from apps.deploy.utils import dispatch as deploy_dispatch
+from apps.deploy.utils import (
+    dispatch as deploy_dispatch,
+    get_running_deploy_error,
+    lock_deploy_and_get_running_request,
+)
 from libs.utils import human_datetime
 from threading import Thread
 import hashlib
 import hmac
 import json
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def auto_deploy(request, deploy_id, kind):
@@ -94,33 +103,42 @@ def _parse_message(body, repo):
 
 
 def _dispatch(deploy_id, ref, commit_id=None, message=None):
-    deploy = Deploy.objects.filter(pk=deploy_id).first()
-    if not deploy:
-        raise Exception(f'no such deploy id for {deploy_id}')
+    with transaction.atomic():
+        deploy, running_request = lock_deploy_and_get_running_request(deploy_id)
+        if not deploy:
+            raise Exception(f'no such deploy id for {deploy_id}')
+        if not deploy.is_audit and running_request:
+            logger.warning(
+                '拦截 Webhook 并发发布: deploy_id=%s, running_request_id=%s, reason=%s',
+                deploy_id,
+                running_request.id,
+                get_running_deploy_error(deploy),
+            )
+            return
 
-    req = DeployRequest(
-        type='3',
-        status='0' if deploy.is_audit else '2',
-        deploy=deploy,
-        spug_version=Repository.make_spug_version(deploy.id),
-        host_ids=deploy.host_ids,
-        created_by=deploy.created_by
-    )
+        req = DeployRequest(
+            type='3',
+            status='0' if deploy.is_audit else '2',
+            deploy=deploy,
+            spug_version=Repository.make_spug_version(deploy.id),
+            host_ids=deploy.host_ids,
+            created_by=deploy.created_by
+        )
 
-    if commit_id:  # branch
-        req.version = f'{ref}#{commit_id[:6]}'
-        req.name = message or req.version
-        if deploy.extend == '1':
-            req.extra = json.dumps(['branch', ref, commit_id])
-    else:  # tag
-        req.version = ref
-        req.name = ref
-        if deploy.extend == '1':
-            req.extra = json.dumps(['tag', ref, None])
+        if commit_id:  # branch
+            req.version = f'{ref}#{commit_id[:6]}'
+            req.name = message or req.version
+            if deploy.extend == '1':
+                req.extra = json.dumps(['branch', ref, commit_id])
+        else:  # tag
+            req.version = ref
+            req.name = ref
+            if deploy.extend == '1':
+                req.extra = json.dumps(['tag', ref, None])
 
-    req.save()
-    if req.status == '2':
-        req.do_at = human_datetime()
-        req.do_by = deploy.created_by
+        if req.status == '2':
+            req.do_at = human_datetime()
+            req.do_by = deploy.created_by
         req.save()
-        deploy_dispatch(req)
+        if req.status == '2':
+            transaction.on_commit(lambda request_obj=req: deploy_dispatch(request_obj))

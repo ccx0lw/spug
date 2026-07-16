@@ -1,7 +1,7 @@
 # Copyright: (c) OpenSpug Organization. https://github.com/openspug/spug
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
-from django.db import connections
+from django.db import connections, transaction
 from django.conf import settings
 from apps.account.models import History, User
 from apps.alarm.models import Alarm
@@ -10,7 +10,7 @@ from apps.deploy.models import DeployRequest
 from apps.app.models import DeployExtend1, DeployExtend3
 from apps.exec.models import ExecHistory, Transfer
 from apps.notify.models import Notify
-from apps.deploy.utils import dispatch
+from apps.deploy.utils import dispatch, lock_deploy_and_get_running_request
 from apps.repository.models import Repository
 from libs.utils import parse_time, human_datetime, human_date
 from datetime import datetime, timedelta
@@ -94,11 +94,40 @@ def auto_run_by_minute():
                 rep.status = '2'
                 rep.save()
 
-        for req in DeployRequest.objects.filter(status='1', plan__lte=now):
-            req.status = '2'
-            req.do_at = human_datetime()
-            req.do_by = req.created_by
-            req.save()
-            Thread(target=dispatch, args=(req,)).start()
+        planned_request_ids = list(DeployRequest.objects.filter(
+            status='1',
+            plan__lte=now,
+        ).values_list('id', flat=True))
+        for request_id in planned_request_ids:
+            with transaction.atomic():
+                request_snapshot = DeployRequest.objects.filter(
+                    pk=request_id,
+                    status='1',
+                    plan__lte=now,
+                ).only('id', 'deploy_id').first()
+                if not request_snapshot:
+                    continue
+                deploy, running_request = lock_deploy_and_get_running_request(
+                    request_snapshot.deploy_id
+                )
+                if not deploy or running_request:
+                    continue
+                req = DeployRequest.objects.select_for_update().filter(
+                    pk=request_snapshot.id,
+                    status='1',
+                    plan__lte=now,
+                ).first()
+                if not req:
+                    continue
+                req.status = '2'
+                req.do_at = human_datetime()
+                req.do_by = req.created_by
+                req.save()
+                transaction.on_commit(
+                    lambda request_obj=req: Thread(
+                        target=dispatch,
+                        args=(request_obj,),
+                    ).start()
+                )
     finally:
         connections.close_all()

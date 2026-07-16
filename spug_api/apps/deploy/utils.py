@@ -381,24 +381,41 @@ def _try_dispatch_queued_requests(iteration, env_id):
             break
         if not pd.request_id:
             continue
-        # 只调度状态为待发布(status='1')的发布申请
-        pending_req = DeployRequest.objects.filter(pk=pd.request_id, status='1').first()
-        if not pending_req:
-            continue
+        with transaction.atomic():
+            request_snapshot = DeployRequest.objects.filter(
+                pk=pd.request_id,
+                status='1',
+            ).only('id', 'deploy_id').first()
+            if not request_snapshot:
+                continue
 
-        # 检查同一 deploy 是否有正在发布中的申请
-        if DeployRequest.objects.filter(deploy=pending_req.deploy, status='2').exists():
-            continue
+            deploy, running_request = lock_deploy_and_get_running_request(
+                request_snapshot.deploy_id
+            )
+            if not deploy or running_request:
+                continue
+            pending_req = DeployRequest.objects.select_for_update().filter(
+                pk=request_snapshot.id,
+                status='1',
+            ).first()
+            if not pending_req:
+                continue
 
-        # 更新发布申请状态为发布中
-        pending_req.status = '2'
-        pending_req.do_at = human_datetime()
-        pending_req.save()
+            pending_req.status = '2'
+            pending_req.do_at = human_datetime()
+            pending_req.save()
 
-        logger.info(f'调度排队发布申请: id={pending_req.id}, app={pending_req.deploy.app.name}')
-        # 启动发布线程
-        Thread(target=dispatch, args=(pending_req, False)).start()
-        dispatched += 1
+            logger.info(
+                f'调度排队发布申请: id={pending_req.id}, '
+                f'app={deploy.app.name}'
+            )
+            transaction.on_commit(
+                lambda req=pending_req: Thread(
+                    target=dispatch,
+                    args=(req, False),
+                ).start()
+            )
+            dispatched += 1
         
 
 def _recover_on_startup():
@@ -490,24 +507,38 @@ def _recover_on_startup():
                 for pd in pending_details:
                     if not pd.request_id:
                         continue
-                    pending_req = DeployRequest.objects.filter(
-                        pk=pd.request_id, status='1'
-                    ).first()
-                    if not pending_req:
-                        continue
-                    if DeployRequest.objects.filter(
-                        deploy=pending_req.deploy, status='2'
-                    ).exists():
-                        continue
-                    pending_req.status = '2'
-                    pending_req.do_at = human_datetime()
-                    pending_req.save()
-                    logger.info(
-                        f'启动恢复调度: id={pending_req.id}, '
-                        f'app={pending_req.deploy.app.name}'
-                    )
-                    Thread(target=dispatch, args=(pending_req, False)).start()
-                    dispatched_total += 1
+                    with transaction.atomic():
+                        request_snapshot = DeployRequest.objects.filter(
+                            pk=pd.request_id,
+                            status='1',
+                        ).only('id', 'deploy_id').first()
+                        if not request_snapshot:
+                            continue
+                        deploy, running_request = lock_deploy_and_get_running_request(
+                            request_snapshot.deploy_id
+                        )
+                        if not deploy or running_request:
+                            continue
+                        pending_req = DeployRequest.objects.select_for_update().filter(
+                            pk=request_snapshot.id,
+                            status='1',
+                        ).first()
+                        if not pending_req:
+                            continue
+                        pending_req.status = '2'
+                        pending_req.do_at = human_datetime()
+                        pending_req.save()
+                        logger.info(
+                            f'启动恢复调度: id={pending_req.id}, '
+                            f'app={deploy.app.name}'
+                        )
+                        transaction.on_commit(
+                            lambda req=pending_req: Thread(
+                                target=dispatch,
+                                args=(req, False),
+                            ).start()
+                        )
+                        dispatched_total += 1
             else:
                 # 有并发限制，使用 _try_dispatch_queued_requests
                 try:

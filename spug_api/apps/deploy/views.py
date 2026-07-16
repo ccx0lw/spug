@@ -220,7 +220,17 @@ class RequestDetailView(View):
             perms = request.user.deploy_perms
             query['deploy__app_id__in'] = perms['apps']
             query['deploy__env_id__in'] = perms['envs']
-        req = DeployRequest.objects.filter(**query).first()
+        req_snapshot = DeployRequest.objects.filter(**query).only('id', 'deploy_id').first()
+        if not req_snapshot:
+            return json_response(error='未找到指定发布申请')
+
+        # 所有入口统一先锁发布配置，再锁申请，避免交叉顺序导致死锁。
+        deploy, running_request = lock_deploy_and_get_running_request(
+            req_snapshot.deploy_id
+        )
+        if not deploy:
+            return json_response(error='未找到对应的发布配置')
+        req = DeployRequest.objects.select_for_update().filter(**query).first()
         if not req:
             return json_response(error='未找到指定发布申请')
         if req.status not in ('1', '-3'):
@@ -230,13 +240,10 @@ class RequestDetailView(View):
             if retry_error:
                 return json_response(error=retry_error)
 
-        deploy = req.deploy
         env = deploy.env
 
-        # 直接查询数据库判断发布状态，避免 Redis 与 DB 状态不一致的问题
-        # 判断当前应用是否有正在发布中的申请
-        if DeployRequest.objects.filter(deploy=deploy, status='2').exists():
-            return json_response(error='当前应用有一个发布申请正在发布中，请等待上一个发布申请执行结束')
+        if running_request:
+            return json_response(error=get_running_deploy_error(deploy))
 
         # 如果 env.conc_num <= 0，则不限制最大并发发布数量
         if env.conc_num > 0:
@@ -255,7 +262,12 @@ class RequestDetailView(View):
         req.do_at = human_datetime()
         req.do_by = request.user
         req.save()
-        Thread(target=dispatch, args=(req, form.mode == 'fail')).start()
+        transaction.on_commit(
+            lambda request_obj=req, fail_mode=form.mode == 'fail': Thread(
+                target=dispatch,
+                args=(request_obj, fail_mode),
+            ).start()
+        )
 
         if req.is_quick_deploy:
             if req.repository_id:
@@ -905,24 +917,39 @@ class IterationPublishView(View):
         
         if error is None:
             try:
-                iteration = DeployIteration.objects.filter(pk=form.iteration_id).first()
+                iteration = DeployIteration.objects.select_for_update().filter(pk=form.iteration_id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
                 
                 # 获取该环境下的所有待发布项 - 兼容处理
                 try:
-                    details = iteration.details.filter(
+                    details = list(iteration.details.select_for_update().filter(
                         deploy__env_id=form.env_id,
                         status='0'  # 待发布
-                    ).order_by('sequence')
+                    ).order_by('sequence'))
                 except Exception:
                     # 字段不存在时获取所有该环境的明细
-                    details = iteration.details.filter(
+                    details = list(iteration.details.select_for_update().filter(
                         deploy__env_id=form.env_id
-                    ).order_by('sequence')
+                    ).order_by('sequence'))
                 
-                if not details.exists():
+                if not details:
                     return json_response(error='该环境下没有待发布的项目')
+
+                # 按固定顺序锁定所有发布配置，避免不同迭代或普通发布并发穿透。
+                deploy_ids = [detail.deploy_id for detail in details]
+                if len(deploy_ids) != len(set(deploy_ids)):
+                    return json_response(error='迭代中存在重复的应用环境发布项，请先移除重复项')
+                locked_deploys = {}
+                for deploy_id in sorted(deploy_ids):
+                    locked_deploy, running_request = lock_deploy_and_get_running_request(
+                        deploy_id
+                    )
+                    if not locked_deploy:
+                        return json_response(error='未找到迭代明细对应的发布配置')
+                    if running_request:
+                        return json_response(error=get_running_deploy_error(locked_deploy))
+                    locked_deploys[deploy_id] = locked_deploy
                 
                 # 获取环境配置，用于设置并发数
                 env = Environment.objects.filter(pk=form.env_id).first()
@@ -950,7 +977,7 @@ class IterationPublishView(View):
                     except AttributeError:
                         pass
                     
-                    deploy = detail.deploy
+                    deploy = locked_deploys[detail.deploy_id]
                     version = detail.version
 
                     # 校验版本不能为空（迭代创建时若加载未完成可能存储了空字符串）
@@ -1170,7 +1197,7 @@ class IterationPublishView(View):
                         env_status[env_id]['success'] += 1
                     elif detail_status == '3':
                         env_status[env_id]['failed'] += 1
-                    
+
                     # 镜像上传状态统计
                     if detail_image_status == '1':
                         env_status[env_id]['image_uploading'] += 1
