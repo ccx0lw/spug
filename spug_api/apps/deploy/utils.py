@@ -147,11 +147,14 @@ def dispatch(req, fail_mode=False):
         raise e
     finally:
         close_old_connections()
+        failed_at = human_datetime() if req.status == '-3' else None
+        req.failed_at = failed_at
         DeployRequest.objects.filter(pk=req.id).update(
             status=req.status,
             repository=req.repository,
             docker_image=req.docker_image,
             fail_host_ids=json.dumps(req.fail_host_ids),
+            failed_at=failed_at,
         )
         # 需求2: 发布完成后同步更新迭代明细状态
         _update_iteration_detail_status(req)
@@ -332,6 +335,7 @@ def _cleanup_stale_requests(env_id, stale_minutes=60):
             f'已超过{stale_minutes}分钟，标记为失败'
         )
         stale_req.status = '-3'
+        stale_req.failed_at = human_datetime()
         stale_req.save()
         # 同步更新迭代明细状态
         _update_iteration_detail_status(stale_req)
@@ -436,6 +440,7 @@ def _recover_on_startup():
                 f'app={req.deploy.app.name}, env={req.deploy.env.name}'
             )
             req.status = '-3'
+            req.failed_at = human_datetime()
             req.save()
             # 同步更新迭代明细状态
             details = DeployIterationDetail.objects.filter(request_id=req.id)

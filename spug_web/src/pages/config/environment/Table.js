@@ -76,6 +76,9 @@ function ComTable() {
       )}/>
       <Table.Column title="标识符" dataIndex="key"/>
       <Table.Column title="同时发布数量" dataIndex="conc_num"/>
+      <Table.Column title="失败重试有效期" render={info => (
+        info.deploy_retry_hours === 0 ? <Tag>禁止重试</Tag> : `${info.deploy_retry_hours} 小时`
+      )}/>
       <Table.Column ellipsis title="描述信息" dataIndex="desc"/>
       {hasPermission('config.env.edit|config.env.del') && (
         <Table.Column title="操作" render={info => (

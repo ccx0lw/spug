@@ -27,9 +27,21 @@ class EnvironmentView(View):
             Argument('key', help='请输入唯一标识符'),
             Argument('prod', type=bool, default=False, required=False),
             Argument('conc_num', type=int, required=False),
+            Argument(
+                'deploy_retry_hours',
+                type=int,
+                filter=lambda x: x >= 0,
+                required=False,
+                help='失败重试有效期不能小于0小时'
+            ),
             Argument('desc', required=False)
         ).parse(request.body)
         if error is None:
+            if form.deploy_retry_hours is None:
+                if form.id:
+                    form.pop('deploy_retry_hours')
+                else:
+                    form.deploy_retry_hours = 24
             if not re.fullmatch(r'\w+', form.key, re.ASCII):
                 return json_response(error='标识符必须为字母、数字和下划线的组合')
 

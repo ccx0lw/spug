@@ -148,7 +148,13 @@ function ComTable() {
         case '-3':
           return <Action>
             <Action.Button auth="deploy.request.do" onClick={() => store.readConsole(info)}>查看</Action.Button>
-            <DoAction info={info}/>
+            {info.retry_allowed ? (
+              <DoAction info={info}/>
+            ) : (
+              <Tooltip title={info.retry_error || '已超过失败重试有效期'}>
+                <Tag>不可重试</Tag>
+              </Tooltip>
+            )}
             {/*{info.visible_rollback && (
               <Action.Button auth="deploy.request.do" onClick={() => store.rollback(info)}>回滚</Action.Button>
             )}*/}

@@ -367,8 +367,8 @@ function Publish() {
         <Space>
           {getStatusIcon(status)}
           {getStatusTag(status, record.status_alias)}
-          {status === '3' && record.request_id && (
-            <Tooltip title="重新发布">
+          {status === '3' && record.request_id && record.request_retry_allowed && (
+            <Tooltip title={`可在 ${record.request_retry_deadline} 前重试`}>
               <Button
                 type="link"
                 size="small"
@@ -378,6 +378,11 @@ function Publish() {
               >
                 重试
               </Button>
+            </Tooltip>
+          )}
+          {status === '3' && record.request_id && !record.request_retry_allowed && (
+            <Tooltip title={record.request_retry_error || '已超过失败重试有效期'}>
+              <Tag>不可重试</Tag>
             </Tooltip>
           )}
         </Space>

@@ -68,7 +68,9 @@ class RequestView(View):
         
         query['created_at_date__range'] = (start_date, end_date)
         
-        for item in DeployRequest.objects.filter(**query).annotate(
+        for item in DeployRequest.objects.filter(**query).select_related(
+                'deploy', 'deploy__env'
+        ).annotate(
                 env_id=F('deploy__env_id'),
                 env_name=F('deploy__env__name'),
                 env_prod=F('deploy__env__prod'),
@@ -98,6 +100,7 @@ class RequestView(View):
             tmp['created_by_user'] = item.created_by_user
             tmp['approve_by_user'] = item.approve_by_user
             tmp['do_by_user'] = item.do_by_user
+            tmp.update(get_deploy_retry_info(item))
             if item.app_extend == '1':
                 tmp['visible_rollback'] = item.deploy_id not in counter
                 counter[item.deploy_id] = True
@@ -222,6 +225,10 @@ class RequestDetailView(View):
             return json_response(error='未找到指定发布申请')
         if req.status not in ('1', '-3'):
             return json_response(error='该申请单当前状态还不能执行发布')
+        if req.status == '-3':
+            retry_error = get_deploy_retry_error(req)
+            if retry_error:
+                return json_response(error=retry_error)
 
         deploy = req.deploy
         env = deploy.env
@@ -523,6 +530,7 @@ def get_request_info(request):
         response = req.to_dict(selects=('status', 'reason'))
         response['fail_host_ids'] = json.loads(req.fail_host_ids)
         response['status_alias'] = req.get_status_display()
+        response.update(get_deploy_retry_info(req))
         return json_response(response)
     return json_response(error=error)
 
@@ -1068,7 +1076,9 @@ class IterationPublishView(View):
                 request_ids = [d.request_id for d in details if d.request_id]
                 requests_map = {}
                 if request_ids:
-                    requests_qs = DeployRequest.objects.filter(pk__in=request_ids)
+                    requests_qs = DeployRequest.objects.filter(pk__in=request_ids).select_related(
+                        'deploy', 'deploy__env'
+                    )
                     requests_map = {r.id: r for r in requests_qs}
                 
                 # 批量获取所有关联的 Docker 镜像
@@ -1193,6 +1203,9 @@ class IterationPublishView(View):
                         'request_id': detail_request_id,
                         'request_status': request_status,
                         'request_status_alias': request_status_alias,
+                        'request_retry_allowed': request_retry_allowed,
+                        'request_retry_deadline': request_retry_deadline,
+                        'request_retry_error': request_retry_error,
                         'sequence': detail.sequence,
                         'is_container': detail.deploy.extend == '3',  # 是否容器发布
                         'image_status': detail_image_status,
@@ -1236,19 +1249,24 @@ class IterationPublishView(View):
         
         if error is None:
             try:
-                detail = DeployIterationDetail.objects.filter(pk=form.detail_id).first()
+                detail = DeployIterationDetail.objects.select_for_update().filter(pk=form.detail_id).first()
                 if not detail:
                     return json_response(error='未找到指定明细')
-                
-                deploy = detail.deploy
                 
                 # 检查是否有关联的发布申请
                 if not detail.request_id:
                     return json_response(error='该明细没有关联的发布申请，请先点击发布')
-                
-                deploy_request = DeployRequest.objects.filter(pk=detail.request_id).first()
+
+                deploy, running_request = lock_deploy_and_get_running_request(
+                    detail.deploy_id
+                )
+                if not deploy:
+                    return json_response(error='未找到对应的发布配置')
+                deploy_request = DeployRequest.objects.select_for_update().filter(pk=detail.request_id).first()
                 if not deploy_request:
                     return json_response(error='未找到关联的发布申请')
+                if deploy_request.deploy_id != deploy.id:
+                    return json_response(error='迭代明细与发布申请的应用环境不一致')
                 
                 # 检查发布申请状态，只有失败状态才能重试
                 if deploy_request.status not in ['-3', '-2', '0']:  # 失败、异常、审核驳回
@@ -1262,6 +1280,13 @@ class IterationPublishView(View):
                         '3': '发布成功'
                     }
                     return json_response(error=f'当前状态为"{status_map.get(deploy_request.status, deploy_request.status)}"，不能重试')
+                if deploy_request.status in ('-3', '-2'):
+                    retry_error = get_deploy_retry_error(deploy_request)
+                    if retry_error:
+                        return json_response(error=retry_error)
+
+                if running_request:
+                    return json_response(error=get_running_deploy_error(deploy))
                 
                 # 检查环境并发限制
                 retry_env = deploy.env

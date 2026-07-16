@@ -5,7 +5,7 @@
  */
 import React, { useState } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Form, Input, message, Switch } from 'antd';
+import { Modal, Form, Input, InputNumber, message, Switch } from 'antd';
 import http from 'libs/http';
 import store from './store';
 
@@ -33,7 +33,11 @@ export default observer(function () {
       onCancel={() => store.formVisible = false}
       confirmLoading={loading}
       onOk={handleSubmit}>
-      <Form form={form} initialValues={store.record} labelCol={{span: 6}} wrapperCol={{span: 14}}>
+      <Form
+        form={form}
+        initialValues={{conc_num: 5, deploy_retry_hours: 24, ...store.record}}
+        labelCol={{span: 6}}
+        wrapperCol={{span: 14}}>
         <Form.Item required name="name" label="环境名称">
           <Input placeholder="请输入环境名称，例如：开发环境"/>
         </Form.Item>
@@ -62,6 +66,14 @@ export default observer(function () {
           extra="同环境下最大同时发布应用数量, <= 0 表示不限制"
           >
             <Input placeholder="请输入数量"/>
+        </Form.Item>
+        <Form.Item
+          required
+          name="deploy_retry_hours"
+          label="失败重试有效期"
+          tooltip="发布失败后允许再次发布的时间窗口"
+          extra="单位：小时；0 表示禁止失败重试">
+          <InputNumber min={0} precision={0} style={{width: '100%'}}/>
         </Form.Item>
         <Form.Item name="desc" label="备注信息">
           <Input.TextArea placeholder="请输入备注信息"/>

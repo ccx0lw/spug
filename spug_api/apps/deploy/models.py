@@ -50,6 +50,7 @@ class DeployRequest(models.Model, ModelMixin):
     approve_at_date = models.DateField(null=True)
     approve_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
     do_at = models.CharField(max_length=20, null=True)
+    failed_at = models.CharField(max_length=20, null=True)
     do_by = models.ForeignKey(User, models.PROTECT, related_name='+', null=True)
 
     @property

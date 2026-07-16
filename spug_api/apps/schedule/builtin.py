@@ -86,6 +86,7 @@ def auto_run_by_minute():
         for req in DeployRequest.objects.filter(status='2'):
             if (now - parse_time(req.do_at)).seconds > 3600:
                 req.status = '-3'
+                req.failed_at = human_datetime()
                 req.save()
 
         for rep in Repository.objects.filter(status='1'):
