@@ -2,9 +2,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
+from apps.account.models import User
+from apps.app.models import App, Deploy
+from apps.config.models import Environment
+from apps.deploy.models import DeployIteration, DeployIterationDetail, DeployRequest
 from apps.deploy.utils import (
+    get_cross_iteration_warnings,
     get_iteration_detail_remove_error,
     get_iteration_detail_status,
     get_iteration_overall_status,
@@ -12,6 +17,181 @@ from apps.deploy.utils import (
     lock_deploy_and_get_running_request,
     reconcile_iteration_detail_statuses,
 )
+
+
+class CrossIterationWarningTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            username='tester',
+            nickname='测试用户',
+            password_hash='-',
+            access_token='test-token',
+            last_login='',
+            last_ip='',
+        )
+        self.env = Environment.objects.create(
+            name='测试环境',
+            key='test',
+            created_by=self.user,
+        )
+        self.app = App.objects.create(
+            name='订单服务',
+            key='order-service',
+            created_by=self.user,
+        )
+        self.deploy = Deploy.objects.create(
+            app=self.app,
+            env=self.env,
+            host_ids='[]',
+            extend='1',
+            is_audit=False,
+            rst_notify='[]',
+            created_by=self.user,
+        )
+        self.iteration = DeployIteration.objects.create(
+            name='当前迭代',
+            env=self.env,
+            created_by=self.user,
+        )
+
+    def create_detail(self, iteration, version, status='0', request_id=None):
+        return DeployIterationDetail.objects.create(
+            iteration=iteration,
+            deploy=self.deploy,
+            version=version,
+            status=status,
+            request_id=request_id,
+            created_by=self.user,
+        )
+
+    def create_success_request(self, version, name='迭代：后续迭代'):
+        return DeployRequest.objects.create(
+            deploy=self.deploy,
+            name=name,
+            type='1',
+            extra='[]',
+            host_ids='[]',
+            status='3',
+            version=version,
+            do_at='2026-07-21 10:00:00',
+            created_by=self.user,
+        )
+
+    def test_later_iteration_success_is_shown_as_version_switch(self):
+        current_detail = self.create_detail(self.iteration, 'v1.0.0')
+        later_iteration = DeployIteration.objects.create(
+            name='后续迭代',
+            env=self.env,
+            status='2',
+            created_by=self.user,
+        )
+        success_request = self.create_success_request('v2.0.0')
+        self.create_detail(
+            later_iteration,
+            'v2.0.0',
+            status='2',
+            request_id=success_request.id,
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertTrue(warning['has_warning'])
+        self.assertEqual('version_switch', warning['kind'])
+        self.assertEqual('warning', warning['level'])
+        self.assertIn('后续迭代【后续迭代】已发布 v2.0.0', warning['message'])
+        self.assertEqual(later_iteration.id, warning['latest_success']['iteration_id'])
+
+    def test_same_latest_version_is_shown_without_blocking(self):
+        current_detail = self.create_detail(self.iteration, 'v2.0.0')
+        self.create_success_request(
+            'v2.0.0',
+            name='单应用指定 Tag 发布',
+        )
+        DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='重启应用',
+            type='0',
+            extra='[]',
+            host_ids='[]',
+            status='3',
+            version=None,
+            do_at='2026-07-21 11:00:00',
+            created_by=self.user,
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertTrue(warning['has_warning'])
+        self.assertEqual('same_version', warning['kind'])
+        self.assertEqual('info', warning['level'])
+        self.assertTrue(warning['latest_success']['is_same_version'])
+
+    def test_other_pending_iteration_is_included_in_warning(self):
+        current_detail = self.create_detail(self.iteration, 'v1.0.0')
+        other_iteration = DeployIteration.objects.create(
+            name='并行规划迭代',
+            env=self.env,
+            created_by=self.user,
+        )
+        self.create_detail(other_iteration, 'v1.1.0')
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertEqual('cross_iteration', warning['kind'])
+        self.assertEqual('warning', warning['level'])
+        self.assertEqual(1, len(warning['related_iterations']))
+        self.assertEqual(
+            other_iteration.id,
+            warning['related_iterations'][0]['iteration_id'],
+        )
+
+    def test_other_retryable_failed_iteration_is_included_in_warning(self):
+        current_detail = self.create_detail(self.iteration, 'v2.0.0')
+        failed_iteration = DeployIteration.objects.create(
+            name='失败迭代',
+            env=self.env,
+            status='-3',
+            created_by=self.user,
+        )
+        failed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        failed_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='迭代：失败迭代',
+            type='1',
+            extra='[]',
+            host_ids='[]',
+            status='-3',
+            version='v1.0.0',
+            do_at=failed_at,
+            failed_at=failed_at,
+            created_by=self.user,
+        )
+        self.create_detail(
+            failed_iteration,
+            'v1.0.0',
+            status='3',
+            request_id=failed_request.id,
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertTrue(warning['has_warning'])
+        self.assertIn('其他失败迭代仍可重试', warning['message'])
+        self.assertTrue(
+            warning['related_iterations'][0]['request_retry_allowed']
+        )
 
 
 class IterationDetailStatusTests(SimpleTestCase):

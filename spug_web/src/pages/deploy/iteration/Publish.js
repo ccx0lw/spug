@@ -24,6 +24,7 @@ import {
 import { Link } from 'react-router-dom';
 import { http } from 'libs';
 import store from './store';
+import S from './index.module.less';
 
 function Publish() {
   const record = store.record;
@@ -54,19 +55,67 @@ function Publish() {
   }, [store.publishVisible, record.id]);
 
 
+  const getWarningColor = (level) => {
+    const colors = {
+      danger: 'error',
+      warning: 'warning',
+      info: 'processing',
+    };
+    return colors[level] || 'default';
+  };
+
+  const renderPublishWarnings = (warningDetails) => (
+    <div style={{ marginTop: 12 }}>
+      <Alert
+        type={warningDetails.some(item => item.cross_iteration_warning.level === 'danger') ? 'error' : 'warning'}
+        showIcon
+        message={`检测到 ${warningDetails.length} 个版本或跨迭代提示`}
+        description={
+          <div>
+            {warningDetails.map(detail => {
+              const warning = detail.cross_iteration_warning;
+              return (
+                <div key={detail.id} style={{ marginTop: 6 }}>
+                  <Tag color={getWarningColor(warning.level)}>{detail.app_name}</Tag>
+                  <span>{warning.message}</span>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 8, color: '#8c8c8c' }}>
+              该信息仅用于提示，确认后仍可继续发布或回滚。
+            </div>
+          </div>
+        }
+      />
+    </div>
+  );
+
   const handlePublish = (envId, envName, isProd) => {
-    if (isProd) {
+    const envStatus = publishStatus.find(item => Number(item.env_id) === Number(envId));
+    const warningDetails = ((envStatus && envStatus.details) || []).filter(detail => (
+      detail.status === '0'
+      && detail.cross_iteration_warning
+      && detail.cross_iteration_warning.has_warning
+    ));
+    if (isProd || warningDetails.length > 0) {
       Modal.confirm({
-        title: '生产环境发布确认',
+        title: isProd ? '生产环境发布确认' : '版本与跨迭代提示',
         icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
         content: (
           <div>
-            <p>您即将发布到 <Tag color="error">{envName}</Tag> (生产环境)</p>
-            <p style={{ color: '#ff4d4f' }}>请确认已完成所有测试环境的验证！</p>
+            {isProd && (
+              <div>
+                <p>您即将发布到 <Tag color="error">{envName}</Tag> (生产环境)</p>
+                <p style={{ color: '#ff4d4f' }}>请确认已完成所有测试环境的验证！</p>
+              </div>
+            )}
+            {warningDetails.length > 0 && renderPublishWarnings(warningDetails)}
           </div>
         ),
-        okText: '确认发布',
-        okButtonProps: { danger: true },
+        okText: warningDetails.length > 0 ? '确认继续发布' : '确认发布',
+        okButtonProps: {
+          danger: isProd || warningDetails.some(item => item.cross_iteration_warning.level !== 'info'),
+        },
         cancelText: '取消',
         onOk: () => doPublish(envId, envName),
       });
@@ -128,11 +177,11 @@ function Publish() {
 
   // 重试发布
   const [retryingPublish, setRetryingPublish] = useState(null);
-  const handleRetryPublish = (detailId, appName) => {
-    setRetryingPublish(detailId);
-    store.retryPublish(detailId)
+  const doRetryPublish = (detail) => {
+    setRetryingPublish(detail.id);
+    return store.retryPublish(detail.id)
       .then(res => {
-        message.success(`${appName} 已重新启动发布`);
+        message.success(`${detail.app_name} 已重新启动发布`);
       })
       .catch(err => {
         message.error(err.message || '重试发布失败');
@@ -140,6 +189,23 @@ function Publish() {
       .finally(() => {
         setRetryingPublish(null);
       });
+  };
+
+  const handleRetryPublish = (detail) => {
+    const warning = detail.cross_iteration_warning;
+    if (!warning || !warning.has_warning) {
+      doRetryPublish(detail);
+      return;
+    }
+    Modal.confirm({
+      title: '重试发布版本提示',
+      icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+      content: renderPublishWarnings([detail]),
+      okText: '确认继续重试',
+      okButtonProps: { danger: warning.level !== 'info' },
+      cancelText: '取消',
+      onOk: () => doRetryPublish(detail),
+    });
   };
 
   // 加载应用版本列表
@@ -360,6 +426,37 @@ function Publish() {
       },
     },
     {
+      title: '版本提示',
+      dataIndex: 'cross_iteration_warning',
+      width: 300,
+      render: (warning) => {
+        if (!warning || !warning.has_warning) {
+          return <span style={{ color: '#bfbfbf' }}>-</span>;
+        }
+        const relatedIterations = warning.related_iterations || [];
+        return (
+          <div>
+            <Tag color={getWarningColor(warning.level)}>{warning.label}</Tag>
+            <Tooltip
+              placement="topLeft"
+              title={
+                <div>
+                  <div>{warning.message}</div>
+                  {relatedIterations.map(item => (
+                    <div key={`${item.iteration_id}-${item.version}`} style={{ marginTop: 4 }}>
+                      迭代：{item.iteration_name}；版本：{item.version}；状态：{item.detail_status_alias}
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <div className={S.versionRiskMessage}>{warning.message}</div>
+            </Tooltip>
+          </div>
+        );
+      },
+    },
+    {
       title: '发布状态',
       dataIndex: 'status',
       width: 150,
@@ -374,7 +471,7 @@ function Publish() {
                 size="small"
                 icon={<SyncOutlined />}
                 loading={retryingPublish === record.id}
-                onClick={() => handleRetryPublish(record.id, record.app_name)}
+                onClick={() => handleRetryPublish(record)}
               >
                 重试
               </Button>
@@ -451,7 +548,7 @@ function Publish() {
           刷新状态
         </Button>,
       ]}
-      width={1000}
+      width={1200}
       bodyStyle={{ padding: '16px 24px', maxHeight: '70vh', overflowY: 'auto' }}
     >
       {/* 总体进度 */}
@@ -499,6 +596,15 @@ function Publish() {
         const isCompleted = success === total;
         const hasContainerApp = has_container || false;
         const canPreUpload = hasContainerApp && pending > 0 && !image_uploading;
+        const warningDetails = (details || []).filter(detail => (
+          detail.cross_iteration_warning && detail.cross_iteration_warning.has_warning
+        ));
+        const hasDangerWarning = warningDetails.some(
+          detail => detail.cross_iteration_warning.level === 'danger'
+        );
+        const onlyInfoWarning = warningDetails.length > 0 && warningDetails.every(
+          detail => detail.cross_iteration_warning.level === 'info'
+        );
         
         return (
           <Card
@@ -565,13 +671,29 @@ function Publish() {
               </Space>
             }
           >
+            {warningDetails.length > 0 && (
+              <Alert
+                style={{ marginBottom: 12 }}
+                type={hasDangerWarning ? 'error' : (onlyInfoWarning ? 'info' : 'warning')}
+                showIcon
+                message={`${warningDetails.length} 个应用存在版本或跨迭代提示`}
+                description="提示不会限制发布，点击发布时可查看具体版本并确认是否继续。"
+              />
+            )}
             <Table
               columns={detailColumns}
               dataSource={details || []}
               rowKey="id"
+              rowClassName={detail => {
+                const warning = detail.cross_iteration_warning;
+                if (!warning || !warning.has_warning) return '';
+                if (warning.level === 'danger') return S.versionDangerRow;
+                if (warning.level === 'warning') return S.versionWarningRow;
+                return S.versionInfoRow;
+              }}
               pagination={false}
               size="small"
-              scroll={{ y: 200 }}
+              scroll={{ x: 1080, y: 200 }}
             />
           </Card>
         );

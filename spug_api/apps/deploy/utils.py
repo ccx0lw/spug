@@ -98,6 +98,218 @@ def get_deploy_retry_error(req, now=None):
     return '' if info['retry_allowed'] else info['retry_error']
 
 
+def get_cross_iteration_warnings(iteration, details):
+    """生成迭代明细的跨迭代版本提示，不参与发布准入判断。"""
+    from django.db.models import OuterRef, Q, Subquery
+    from apps.app.models import Deploy
+    from apps.deploy.models import DeployIterationDetail
+
+    details = list(details)
+    deploy_ids = {detail.deploy_id for detail in details if detail.deploy_id}
+    if not deploy_ids:
+        return {}
+
+    # do_at 会在失败重试时刷新，比申请 ID 更接近服务最后一次实际发布成功的顺序。
+    latest_request = DeployRequest.objects.filter(
+        deploy_id=OuterRef('pk'),
+        status='3',
+        type__in=('1', '2', '3'),
+        version__isnull=False,
+    ).order_by('-do_at', '-id')
+    latest_request_ids = [
+        request_id
+        for request_id in Deploy.objects.filter(pk__in=deploy_ids).annotate(
+            latest_request_id=Subquery(latest_request.values('id')[:1])
+        ).values_list('latest_request_id', flat=True)
+        if request_id
+    ]
+    latest_requests = DeployRequest.objects.filter(
+        pk__in=latest_request_ids
+    ).select_related('created_by')
+    latest_request_by_deploy = {req.deploy_id: req for req in latest_requests}
+
+    latest_iteration_details = DeployIterationDetail.objects.filter(
+        request_id__in=latest_request_ids
+    ).select_related('iteration')
+    latest_detail_by_request = {
+        detail.request_id: detail for detail in latest_iteration_details
+    }
+
+    # 未完成的其他迭代始终展示；历史记录只展示最近一次成功发布，避免信息过载。
+    related_details = list(DeployIterationDetail.objects.filter(
+        deploy_id__in=deploy_ids,
+        status__in=('0', '1'),
+    ).exclude(
+        iteration_id=iteration.id
+    ).select_related('iteration').order_by('-iteration_id', 'sequence'))
+    max_retry_hours = max(
+        (
+            getattr(detail.deploy.env, 'deploy_retry_hours', 24)
+            for detail in details
+            if detail.deploy and detail.deploy.env
+        ),
+        default=0,
+    )
+    retryable_requests = {}
+    if max_retry_hours > 0:
+        retry_threshold = human_datetime(
+            datetime.now() - timedelta(hours=max_retry_hours)
+        )
+        failed_requests = DeployRequest.objects.filter(
+            deploy_id__in=deploy_ids,
+            status__in=('-3', '-2'),
+        ).filter(
+            Q(failed_at__gte=retry_threshold) | Q(do_at__gte=retry_threshold)
+        ).select_related('deploy__env')
+        for req in failed_requests:
+            retry_info = get_deploy_retry_info(req)
+            if retry_info['retry_allowed']:
+                retryable_requests[req.id] = retry_info
+        if retryable_requests:
+            related_details.extend(DeployIterationDetail.objects.filter(
+                deploy_id__in=deploy_ids,
+                request_id__in=retryable_requests,
+                status='3',
+            ).exclude(
+                iteration_id=iteration.id
+            ).select_related('iteration'))
+
+    related_request_ids = {
+        detail.request_id for detail in related_details if detail.request_id
+    }
+    related_requests = {
+        req.id: req for req in DeployRequest.objects.filter(
+            pk__in=related_request_ids
+        )
+    }
+    related_by_deploy = {}
+    for detail in related_details:
+        req = related_requests.get(detail.request_id)
+        effective_status = get_iteration_detail_status(req.status) if req else detail.status
+        retry_info = retryable_requests.get(detail.request_id)
+        if effective_status not in ('0', '1') and not (
+            effective_status == '3' and retry_info
+        ):
+            continue
+        related_by_deploy.setdefault(detail.deploy_id, []).append({
+            'iteration_id': detail.iteration_id,
+            'iteration_name': detail.iteration.name,
+            'iteration_status': detail.iteration.status,
+            'iteration_status_alias': detail.iteration.get_status_display(),
+            'detail_status': effective_status,
+            'detail_status_alias': dict(
+                DeployIterationDetail.STATUS_CHOICES
+            ).get(effective_status, detail.get_status_display()),
+            'version': detail.version,
+            'request_id': detail.request_id,
+            'request_status': req.status if req else None,
+            'request_status_alias': req.get_status_display() if req else None,
+            'request_retry_allowed': bool(retry_info),
+            'request_retry_deadline': (
+                retry_info['retry_deadline'] if retry_info else None
+            ),
+            'is_later_iteration': detail.iteration_id > iteration.id,
+        })
+
+    result = {}
+    for detail in details:
+        messages = []
+        level = 'none'
+        kind = 'none'
+        label = ''
+        latest_success = None
+
+        latest_req = latest_request_by_deploy.get(detail.deploy_id)
+        latest_detail = latest_detail_by_request.get(latest_req.id) if latest_req else None
+        # 当前明细自己的成功记录不属于跨迭代提示。
+        is_current_iteration_release = (
+            latest_detail is not None
+            and latest_detail.iteration_id == iteration.id
+        )
+        if latest_req and not is_current_iteration_release:
+            is_same_version = latest_req.version == detail.version
+            latest_success = {
+                'request_id': latest_req.id,
+                'request_name': latest_req.name,
+                'version': latest_req.version,
+                'do_at': latest_req.do_at,
+                'created_by_user': latest_req.created_by.nickname if latest_req.created_by else '',
+                'iteration_id': latest_detail.iteration_id if latest_detail else None,
+                'iteration_name': latest_detail.iteration.name if latest_detail else None,
+                'is_later_iteration': (
+                    latest_detail.iteration_id > iteration.id if latest_detail else False
+                ),
+                'is_same_version': is_same_version,
+            }
+            if is_same_version:
+                level = 'info'
+                kind = 'same_version'
+                label = '相同版本'
+                messages.append(f'最近成功发布版本同为 {detail.version}')
+            else:
+                level = 'warning'
+                kind = 'version_switch'
+                label = '版本切换提示'
+                if latest_detail and latest_detail.iteration_id > iteration.id:
+                    messages.append(
+                        f'后续迭代【{latest_detail.iteration.name}】已发布 '
+                        f'{latest_req.version}，本次将切换为 {detail.version}'
+                    )
+                else:
+                    messages.append(
+                        f'最近成功版本为 {latest_req.version}，本次将切换为 '
+                        f'{detail.version}，可能属于回滚'
+                    )
+
+        related_iterations = related_by_deploy.get(detail.deploy_id, [])
+        publishing_iterations = [
+            item for item in related_iterations if item['detail_status'] == '1'
+        ]
+        retryable_iterations = [
+            item for item in related_iterations if item['request_retry_allowed']
+        ]
+        if publishing_iterations:
+            level = 'danger'
+            kind = 'active_iteration'
+            label = '其他迭代发布中'
+            names = '、'.join(
+                f'【{item["iteration_name"]}】{item["version"]}'
+                for item in publishing_iterations[:3]
+            )
+            messages.insert(0, f'其他迭代正在处理同一服务：{names}')
+        elif related_iterations:
+            if level in ('none', 'info'):
+                level = 'warning'
+                kind = 'cross_iteration'
+                label = '跨迭代重复'
+            pending_iterations = [
+                item for item in related_iterations if item['detail_status'] == '0'
+            ]
+            if pending_iterations:
+                names = '、'.join(
+                    f'【{item["iteration_name"]}】{item["version"]}'
+                    for item in pending_iterations[:3]
+                )
+                messages.append(f'其他待发布迭代也包含该服务：{names}')
+            if retryable_iterations:
+                names = '、'.join(
+                    f'【{item["iteration_name"]}】{item["version"]}'
+                    for item in retryable_iterations[:3]
+                )
+                messages.append(f'其他失败迭代仍可重试该服务：{names}')
+
+        result[detail.id] = {
+            'has_warning': bool(messages),
+            'level': level,
+            'kind': kind,
+            'label': label,
+            'message': '；'.join(messages),
+            'latest_success': latest_success,
+            'related_iterations': related_iterations,
+        }
+    return result
+
+
 def dispatch(req, fail_mode=False):
     rds = get_redis_connection()
     rds_key = f'{settings.REQUEST_KEY}:{req.id}'

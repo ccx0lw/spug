@@ -17,6 +17,7 @@ from apps.deploy.utils import (
     get_iteration_detail_status,
     get_iteration_detail_remove_error,
     get_iteration_overall_status,
+    get_cross_iteration_warnings,
     get_deploy_retry_error,
     get_deploy_retry_info,
     get_running_deploy_error,
@@ -1098,6 +1099,12 @@ class IterationPublishView(View):
 
                 # 发布申请是状态源，先校准明细再统计，避免本次响应继续返回旧的“发布中”状态
                 reconcile_iteration_detail_statuses(details)
+
+                # 仅用于页面风险提示，不改变发布申请的创建和调度规则。
+                cross_iteration_warnings = get_cross_iteration_warnings(
+                    iteration,
+                    details,
+                )
                 
                 # 批量获取所有关联的发布申请
                 request_ids = [d.request_id for d in details if d.request_id]
@@ -1239,6 +1246,15 @@ class IterationPublishView(View):
                         'image_status_alias': dict(DeployIterationDetail.IMAGE_STATUS_CHOICES).get(detail_image_status, '未上传'),
                         'docker_image_id': detail_docker_image_id,
                         'docker_image': docker_image_info,
+                        'cross_iteration_warning': cross_iteration_warnings.get(detail.id, {
+                            'has_warning': False,
+                            'level': 'none',
+                            'kind': 'none',
+                            'label': '',
+                            'message': '',
+                            'latest_success': None,
+                            'related_iterations': [],
+                        }),
                     })
                 
                 # 批量更新需要同步的明细状态
