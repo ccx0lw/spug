@@ -1,7 +1,7 @@
 /.idea/
 dump.rdb
 nohup.out
-package-lock.json
+/package-lock.json
 /spug_api/spug/overrides.py
 /node_modules/
 .DS_Store
