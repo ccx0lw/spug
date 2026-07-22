@@ -2038,7 +2038,9 @@ class IterationDetailView(View):
         ).parse(request.body)
         if error is None:
             try:
-                detail = DeployIterationDetail.objects.get(pk=form.detail_id)
+                detail = DeployIterationDetail.objects.select_for_update().select_related(
+                    'iteration', 'deploy__app', 'deploy__env'
+                ).get(pk=form.detail_id)
                 iteration = detail.iteration
                 
                 # 检查迭代状态 - 已完全成功的迭代不允许修改
@@ -2057,6 +2059,25 @@ class IterationDetailView(View):
                 # 如果发布已成功，不允许修改
                 if detail.status == '2':
                     return json_response(error='该应用已发布成功，无法修改版本')
+
+                if detail.status == '1':
+                    return json_response(error='该应用正在发布中，无法修改版本')
+
+                # 发布失败后修改版本会重置为待发布，必须受同一重试窗口约束。
+                if detail.status == '3':
+                    if not detail.request_id:
+                        return json_response(error='该应用没有关联的失败发布申请，无法修改版本')
+                    deploy_request = DeployRequest.objects.select_for_update().select_related(
+                        'deploy__env'
+                    ).filter(
+                        pk=detail.request_id,
+                        deploy_id=detail.deploy_id,
+                    ).first()
+                    if not deploy_request:
+                        return json_response(error='未找到该应用关联的失败发布申请，无法修改版本')
+                    retry_error = get_deploy_retry_error(deploy_request)
+                    if retry_error:
+                        return json_response(error=retry_error)
                 
                 # 更新版本
                 detail.version = form.version

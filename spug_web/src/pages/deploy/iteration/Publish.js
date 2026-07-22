@@ -331,23 +331,22 @@ function Publish() {
       dataIndex: 'version',
       width: 150,
       render: (text, detail) => {
-        // 判断是否可以编辑版本
-        // 可编辑条件：(镜像失败或未上传) 或 (发布失败且镜像未上传) 
-        // 不可编辑条件：镜像上传中 或 镜像已成功上传 或 发布已成功
+        // 待发布，或发布失败且仍允许重试时，才允许修改版本。
         const imageStatus = detail.image_status;
         const status = detail.status;
         const isContainer = detail.is_container;
         
-        // 镜像上传中、镜像已成功上传或发布已成功，不允许修改
         const imageUploading = isContainer && imageStatus === '1';  // 上传中
         const imageUploaded = isContainer && imageStatus === '2';   // 已上传
-        const publishSuccess = status === '2';
-        const canEditVersion = !imageUploading && !imageUploaded && !publishSuccess;
-        // 只有失败状态或待发布状态才显示编辑按钮
-        const showEditButton = canEditVersion && (imageStatus === '3' || status === '3' || status === '0');
+        const retryableFailure = status === '3'
+          && detail.request_id
+          && detail.request_retry_allowed;
+        const canEditVersion = !imageUploading
+          && !imageUploaded
+          && (status === '0' || retryableFailure);
 
         // 正在编辑中
-        if (editingVersion === detail.id) {
+        if (editingVersion === detail.id && canEditVersion) {
           const versions = versionOptions[detail.id] || [];
           return (
             <Space>
@@ -383,7 +382,7 @@ function Publish() {
         return (
           <Space>
             <Tag color="default" style={{ fontFamily: 'monospace' }}>{text}</Tag>
-            {showEditButton && (
+            {canEditVersion && (
               <Tooltip title={getEditTooltip()}>
                 <Button
                   type="link"
@@ -428,7 +427,7 @@ function Publish() {
     {
       title: '版本提示',
       dataIndex: 'cross_iteration_warning',
-      width: 300,
+      width: 220,
       render: (warning) => {
         if (!warning || !warning.has_warning) {
           return <span style={{ color: '#bfbfbf' }}>-</span>;
@@ -459,7 +458,7 @@ function Publish() {
     {
       title: '发布状态',
       dataIndex: 'status',
-      width: 150,
+      width: 230,
       render: (status, record) => (
         <Space>
           {getStatusIcon(status)}
@@ -475,11 +474,6 @@ function Publish() {
               >
                 重试
               </Button>
-            </Tooltip>
-          )}
-          {status === '3' && record.request_id && !record.request_retry_allowed && (
-            <Tooltip title={record.request_retry_error || '已超过失败重试有效期'}>
-              <Tag>不可重试</Tag>
             </Tooltip>
           )}
         </Space>

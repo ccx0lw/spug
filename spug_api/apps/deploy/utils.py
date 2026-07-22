@@ -261,7 +261,15 @@ def get_cross_iteration_warnings(iteration, details):
                         f'{detail.version}，可能属于回滚'
                     )
 
-        related_iterations = related_by_deploy.get(detail.deploy_id, [])
+        # 跨迭代重复只对仍可执行发布动作的明细有意义。失败且已超过重试
+        # 有效期的明细不能再次发布，不应再与其他迭代形成重复提示。
+        can_publish_again = detail.status in ('0', '1') or (
+            detail.status == '3' and detail.request_id in retryable_requests
+        )
+        related_iterations = (
+            related_by_deploy.get(detail.deploy_id, [])
+            if can_publish_again else []
+        )
         publishing_iterations = [
             item for item in related_iterations if item['detail_status'] == '1'
         ]

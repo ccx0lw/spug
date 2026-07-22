@@ -159,9 +159,11 @@ function ComTable() {
             {info.retry_allowed ? (
               <DoAction info={info}/>
             ) : (
-              <Tooltip title={info.retry_error || '已超过失败重试有效期'}>
-                <Tag>不可重试</Tag>
-              </Tooltip>
+              hasPermission('deploy.request.do') && (
+                <Tooltip title={info.retry_error || '已超过失败重试有效期'}>
+                  <span><Action.Button disabled>发布</Action.Button></span>
+                </Tooltip>
+              )
             )}
             {/*{info.visible_rollback && (
               <Action.Button auth="deploy.request.do" onClick={() => store.rollback(info)}>回滚</Action.Button>
