@@ -6,6 +6,7 @@ from django.urls import path
 from .views import *
 
 urlpatterns = [
+    path('operation-log/', OperationLogView.as_view()),
     path('request/', RequestView.as_view()),
     path('request/info/', get_request_info),
     path('request/ext1/', post_request_ext1),

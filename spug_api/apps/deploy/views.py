@@ -8,7 +8,13 @@ from django.db import transaction
 from django.http.response import HttpResponseBadRequest
 from django_redis import get_redis_connection
 from libs import json_response, JsonParser, Argument, human_datetime, human_time, auth
-from apps.deploy.models import DeployRequest, DeployIteration, DeployIterationDetail
+from apps.deploy.models import (
+    DeployIteration,
+    DeployIterationDetail,
+    DeployOperationLog,
+    DeployRequest,
+)
+from apps.deploy.audit import format_app_environment_action, record_deploy_operation
 from apps.app.models import Deploy, DeployExtend2
 from apps.repository.models import Repository
 from apps.deploy.utils import (
@@ -33,6 +39,59 @@ from datetime import datetime
 import subprocess
 import json
 import os
+
+
+class OperationLogView(View):
+    @auth('deploy.request.view|deploy.iteration.view')
+    def get(self, request):
+        form, error = JsonParser(
+            Argument(
+                'target_type',
+                filter=lambda value: value in ('request', 'iteration'),
+                help='日志对象类型错误',
+            ),
+            Argument('target_id', type=int, help='日志对象ID错误'),
+        ).parse(request.GET)
+        if error:
+            return json_response(error=error)
+
+        permission = (
+            'deploy.request.view'
+            if form.target_type == 'request'
+            else 'deploy.iteration.view'
+        )
+        if not request.user.has_perms([permission]):
+            return json_response(error='权限拒绝')
+
+        if not request.user.is_supper:
+            perms = request.user.deploy_perms
+            if form.target_type == 'request':
+                target_visible = DeployRequest.objects.filter(
+                    pk=form.target_id,
+                    deploy__app_id__in=perms['apps'],
+                    deploy__env_id__in=perms['envs'],
+                ).exists()
+            else:
+                target_visible = DeployIteration.objects.filter(
+                    pk=form.target_id,
+                    env_id__in=perms['envs'],
+                ).exists()
+            if not target_visible:
+                return json_response(error='未找到日志对象或无查看权限')
+
+        data = [
+            {
+                'id': item.id,
+                'operator_name': item.operator_name,
+                'action': item.action,
+                'created_at': item.created_at,
+            }
+            for item in DeployOperationLog.objects.filter(
+                target_type=form.target_type,
+                target_id=form.target_id,
+            )[:200]
+        ]
+        return json_response(data)
 
 
 class RequestView(View):
@@ -124,7 +183,11 @@ class RequestView(View):
                 deploy = DeployRequest.objects.filter(pk=form.id).first()
                 if not deploy or deploy.status not in ('0', '1', '-1'):
                     return json_response(error='未找到指定发布申请或当前状态不允许删除')
+                deploy_id, deploy_name = deploy.id, deploy.name
                 deploy.delete()
+                record_deploy_operation(
+                    'request', deploy_id, deploy_name, '删除发布申请', request.user
+                )
                 return json_response()
 
             # 批量删除：使用 batch_del 权限
@@ -236,7 +299,8 @@ class RequestDetailView(View):
             return json_response(error='未找到指定发布申请')
         if req.status not in ('1', '-3'):
             return json_response(error='该申请单当前状态还不能执行发布')
-        if req.status == '-3':
+        is_retry = req.status == '-3'
+        if is_retry:
             retry_error = get_deploy_retry_error(req)
             if retry_error:
                 return json_response(error=retry_error)
@@ -263,6 +327,11 @@ class RequestDetailView(View):
         req.do_at = human_datetime()
         req.do_by = request.user
         req.save()
+        mode_name = '补偿发布' if form.mode == 'fail' else '全量发布'
+        action = f'重试发布申请（{mode_name}）' if is_retry else f'执行发布申请（{mode_name}）'
+        record_deploy_operation(
+            'request', req.id, req.name, action, request.user
+        )
         transaction.on_commit(
             lambda request_obj=req, fail_mode=form.mode == 'fail': Thread(
                 target=dispatch,
@@ -323,6 +392,13 @@ class RequestDetailView(View):
             req.status = '1' if form.is_pass else '-1'
             req.reason = form.reason
             req.save()
+            record_deploy_operation(
+                'request',
+                req.id,
+                req.name,
+                '审核通过发布申请' if form.is_pass else '驳回发布申请',
+                request.user,
+            )
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_rst')).start()
         return json_response(error=error)
     
@@ -372,13 +448,21 @@ def post_request_ext1(request):
         form.status = '0' if deploy.is_audit else '1'
         # form.host_ids = json.dumps(sorted(form.host_ids))
         form.host_ids = deploy.host_ids
-        if form.id:
+        is_edit = bool(form.id)
+        if is_edit:
             req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
             DeployRequest.objects.filter(pk=form.id).update(created_by=request.user, reason=None, **form)
         else:
             req = DeployRequest.objects.create(created_by=request.user, **form)
             is_required_notify = deploy.is_audit
+        record_deploy_operation(
+            'request',
+            req.id,
+            form.name,
+            '修改发布申请' if is_edit else '创建发布申请',
+            request.user,
+        )
         if is_required_notify:
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_req')).start()
     return json_response(error=error)
@@ -412,6 +496,9 @@ def post_request_ext1_rollback(request):
             spug_version=req.spug_version,
             created_by=request.user,
             **form
+        )
+        record_deploy_operation(
+            'request', new_req.id, new_req.name, '创建回滚发布申请', request.user
         )
         if req.deploy.is_audit:
             Thread(target=Helper.send_deploy_notify, args=(new_req, 'approve_req')).start()
@@ -447,7 +534,8 @@ def post_request_ext2(request):
         form.status = '0' if deploy.is_audit else '1'
         # form.host_ids = json.dumps(form.host_ids)
         form.host_ids = deploy.host_ids
-        if form.id:
+        is_edit = bool(form.id)
+        if is_edit:
             req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
             form.update(created_by=request.user, reason=None)
@@ -455,6 +543,13 @@ def post_request_ext2(request):
         else:
             req = DeployRequest.objects.create(created_by=request.user, **form)
             is_required_notify = deploy.is_audit
+        record_deploy_operation(
+            'request',
+            req.id,
+            req.name,
+            '修改发布申请' if is_edit else '创建发布申请',
+            request.user,
+        )
         if is_required_notify:
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_req')).start()
     return json_response(error=error)
@@ -522,13 +617,21 @@ def post_request_ext3(request):
         form.status = '0' if deploy.is_audit else '1'
         # form.host_ids = json.dumps(sorted(form.host_ids))
         form.host_ids = deploy.host_ids
-        if form.id:
+        is_edit = bool(form.id)
+        if is_edit:
             req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
             DeployRequest.objects.filter(pk=form.id).update(created_by=request.user, reason=None, **form)
         else:
             req = DeployRequest.objects.create(created_by=request.user, **form)
             is_required_notify = deploy.is_audit
+        record_deploy_operation(
+            'request',
+            req.id,
+            form.name,
+            '修改发布申请' if is_edit else '创建发布申请',
+            request.user,
+        )
         if is_required_notify:
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_req')).start()
     return json_response(error=error)
@@ -757,6 +860,10 @@ class IterationView(View):
                         sequence=item.get('sequence', 0),
                         created_by=request.user
                     )
+
+                record_deploy_operation(
+                    'iteration', iteration.id, iteration.name, '创建迭代', request.user
+                )
                 
                 result = iteration.to_dict()
                 result['env_name'] = iteration.env.name
@@ -857,6 +964,10 @@ class IterationView(View):
                             sequence=item.get('sequence', 0),
                             created_by=request.user
                         )
+
+                record_deploy_operation(
+                    'iteration', iteration.id, iteration.name, '修改迭代', request.user
+                )
                 
                 result = iteration.to_dict()
                 result['env_name'] = iteration.env.name
@@ -898,7 +1009,15 @@ class IterationView(View):
                     status_map = {'0': '待发布', '1': '发布中', '2': '发布成功', '-1': '已取消', '-3': '发布异常'}
                     return json_response(error=f'当前状态为"{status_map.get(iteration.status, iteration.status)}"，只有待发布状态才能删除')
                 
+                iteration_id, iteration_name = iteration.id, iteration.name
                 iteration.delete()
+                record_deploy_operation(
+                    'iteration',
+                    iteration_id,
+                    iteration_name,
+                    '删除迭代',
+                    request.user,
+                )
                 return json_response()
             except Exception as e:
                 return json_response(error=str(e))
@@ -1036,6 +1155,13 @@ class IterationPublishView(View):
                         desc=f'迭代发布: {iteration.name}',
                         created_by=request.user
                     )
+                    record_deploy_operation(
+                        'request',
+                        deploy_request.id,
+                        deploy_request.name,
+                        '由迭代发布创建申请',
+                        request.user,
+                    )
                     
                     # 更新明细状态和关联的发布申请ID - 兼容处理
                     try:
@@ -1059,6 +1185,14 @@ class IterationPublishView(View):
                 # 更新迭代状态为发布中
                 iteration.status = '1'  # 发布中
                 iteration.save()
+                env_name = env.name if env else str(form.env_id)
+                record_deploy_operation(
+                    'iteration',
+                    iteration.id,
+                    iteration.name,
+                    f'发布迭代环境【{env_name}】',
+                    request.user,
+                )
                 
                 # 使用 on_commit 确保事务提交后再启动发布线程
                 for req_obj in pending_dispatches:
@@ -1413,6 +1547,20 @@ class IterationPublishView(View):
                         if iteration.status not in ['1']:
                             iteration.status = '1'
                             iteration.save()
+                        record_deploy_operation(
+                            'request',
+                            new_request.id,
+                            new_request.name,
+                            '由迭代重试创建申请',
+                            request.user,
+                        )
+                        record_deploy_operation(
+                            'iteration',
+                            iteration.id,
+                            iteration.name,
+                            format_app_environment_action('重试', deploy, '发布'),
+                            request.user,
+                        )
                         
                         # 使用 on_commit 确保事务提交后再启动发布线程
                         _new_req = new_request
@@ -1438,6 +1586,20 @@ class IterationPublishView(View):
                 if iteration.status != '1':
                     iteration.status = '1'
                     iteration.save()
+                record_deploy_operation(
+                    'request',
+                    deploy_request.id,
+                    deploy_request.name,
+                    '通过迭代重试发布申请',
+                    request.user,
+                )
+                record_deploy_operation(
+                    'iteration',
+                    iteration.id,
+                    iteration.name,
+                    format_app_environment_action('重试', deploy, '发布'),
+                    request.user,
+                )
                 
                 # 使用 on_commit 确保事务提交后再启动发布线程
                 _retry_req = deploy_request
@@ -1667,6 +1829,17 @@ class IterationImageView(View):
                 if has_image_action and iteration.status == '0':  # 只有待发布状态才更新
                     iteration.status = '1'  # 发布中
                     iteration.save()
+                if has_image_action:
+                    env_name = Environment.objects.filter(
+                        pk=form.env_id
+                    ).values_list('name', flat=True).first() or str(form.env_id)
+                    record_deploy_operation(
+                        'iteration',
+                        iteration.id,
+                        iteration.name,
+                        f'预传环境【{env_name}】镜像',
+                        request.user,
+                    )
                 
                 result_msg = f'已创建 {len(created_images)} 个镜像编译任务'
                 if skipped:
@@ -1698,12 +1871,16 @@ class IterationImageView(View):
                 from apps.docker_image.utils import dispatch
                 from threading import Thread
                 
-                detail = DeployIterationDetail.objects.filter(pk=form.detail_id).first()
+                detail = DeployIterationDetail.objects.select_related(
+                    'iteration', 'deploy__app', 'deploy__env'
+                ).filter(pk=form.detail_id).first()
                 if not detail:
                     return json_response(error='未找到指定明细')
                 
                 deploy = detail.deploy
                 version = detail.version
+                iteration = detail.iteration
+                app_name = deploy.app.name if deploy.app else str(deploy.app_id)
                 
                 if deploy.extend != '3':
                     return json_response(error='该应用不是容器发布类型')
@@ -1720,6 +1897,13 @@ class IterationImageView(View):
                     detail.image_status = '2'  # 上传成功
                     detail.docker_image_id = existing_success_image.id
                     detail.save()
+                    record_deploy_operation(
+                        'iteration',
+                        iteration.id,
+                        iteration.name,
+                        format_app_environment_action('重试', deploy, '镜像'),
+                        request.user,
+                    )
                     return json_response({
                         'message': f'已复用已有成功镜像 (ID: {existing_success_image.id})',
                         'docker_image_id': existing_success_image.id
@@ -1735,6 +1919,13 @@ class IterationImageView(View):
                             # 镜像已成功，直接更新状态
                             detail.image_status = '2'  # 上传成功
                             detail.save()
+                            record_deploy_operation(
+                                'iteration',
+                                iteration.id,
+                                iteration.name,
+                                format_app_environment_action('重试', deploy, '镜像'),
+                                request.user,
+                            )
                             return json_response({
                                 'message': '镜像已编译成功，无需重试',
                                 'docker_image_id': docker_image.id
@@ -1751,6 +1942,13 @@ class IterationImageView(View):
                         docker_image.save()
                         detail.image_status = '1'  # 上传中
                         detail.save()
+                        record_deploy_operation(
+                            'iteration',
+                            iteration.id,
+                            iteration.name,
+                            format_app_environment_action('重试', deploy, '镜像'),
+                            request.user,
+                        )
                         Thread(target=dispatch, args=(docker_image,)).start()
                         return json_response({
                             'message': '已重新启动镜像编译',
@@ -1784,6 +1982,13 @@ class IterationImageView(View):
                 detail.image_status = '1'
                 detail.docker_image_id = docker_image.id
                 detail.save()
+                record_deploy_operation(
+                    'iteration',
+                    iteration.id,
+                    iteration.name,
+                    format_app_environment_action('重试', deploy, '镜像'),
+                    request.user,
+                )
                 
                 Thread(target=dispatch, args=(docker_image,)).start()
                 
@@ -1836,6 +2041,13 @@ class IterationDetailView(View):
                     detail.status = '0'
                     detail.request_id = None
                 detail.save()
+                record_deploy_operation(
+                    'iteration',
+                    iteration.id,
+                    iteration.name,
+                    format_app_environment_action('修改', detail.deploy, '版本'),
+                    request.user,
+                )
                 
                 return json_response({'message': '版本更新成功'})
             except DeployIterationDetail.DoesNotExist:
@@ -1865,7 +2077,7 @@ class IterationDetailView(View):
                     pk=detail_snapshot.iteration_id
                 )
                 detail = DeployIterationDetail.objects.select_for_update().select_related(
-                    'deploy', 'deploy__app'
+                    'deploy', 'deploy__app', 'deploy__env'
                 ).filter(pk=form.detail_id, iteration=iteration).first()
                 if not detail:
                     return json_response(error='详情不存在或已被移除')
@@ -1883,6 +2095,13 @@ class IterationDetailView(View):
                     iteration.status = new_status
                     iteration.save()
                 iteration_status = new_status or iteration.status
+                record_deploy_operation(
+                    'iteration',
+                    iteration.id,
+                    iteration.name,
+                    format_app_environment_action('移除', detail.deploy),
+                    request.user,
+                )
 
             return json_response({
                 'message': f'应用【{app_name}】已从迭代中移除',

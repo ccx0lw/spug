@@ -155,3 +155,33 @@ class DeployIterationDetail(models.Model, ModelMixin):
         db_table = 'deploy_iteration_details'
         ordering = ('sequence',)
         unique_together = ('iteration', 'deploy')
+
+
+class DeployOperationLog(models.Model):
+    TARGET_TYPES = (
+        ('request', '发布申请'),
+        ('iteration', '迭代'),
+    )
+
+    target_type = models.CharField(max_length=20, choices=TARGET_TYPES)
+    target_id = models.IntegerField()
+    target_name = models.CharField(max_length=100)
+    action = models.CharField(max_length=255)
+    operator = models.ForeignKey(
+        User,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+    )
+    operator_name = models.CharField(max_length=100)
+    created_at = models.CharField(max_length=20, default=human_datetime)
+
+    class Meta:
+        db_table = 'deploy_operation_logs'
+        ordering = ('-id',)
+        indexes = [
+            models.Index(
+                fields=('target_type', 'target_id'),
+                name='deploy_op_target_idx',
+            ),
+        ]

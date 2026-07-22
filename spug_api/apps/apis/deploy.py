@@ -5,6 +5,7 @@ from django.http.response import HttpResponseBadRequest, HttpResponseForbidden, 
 from django.db import transaction
 from apps.setting.utils import AppSetting
 from apps.deploy.models import DeployRequest
+from apps.deploy.audit import record_deploy_operation
 from apps.repository.models import Repository
 from apps.deploy.utils import (
     dispatch as deploy_dispatch,
@@ -140,5 +141,8 @@ def _dispatch(deploy_id, ref, commit_id=None, message=None):
             req.do_at = human_datetime()
             req.do_by = deploy.created_by
         req.save()
+        record_deploy_operation(
+            'request', req.id, req.name, 'Webhook 自动创建发布申请'
+        )
         if req.status == '2':
             transaction.on_commit(lambda request_obj=req: deploy_dispatch(request_obj))

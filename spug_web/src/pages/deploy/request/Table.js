@@ -3,7 +3,7 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { observer } from 'mobx-react';
 import { BranchesOutlined, BuildOutlined, TagOutlined, PlusOutlined, TagsOutlined, ContainerOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Radio, Modal, Popover, Tag, Popconfirm, Tooltip, message } from 'antd';
@@ -13,6 +13,7 @@ import S from './index.module.less';
 import store from './store';
 import moment from 'moment';
 import tagStore from 'pages/config/tag/store';
+import OperationLog from 'pages/deploy/OperationLog';
 
 function DeployConfirm() {
   return (
@@ -25,6 +26,7 @@ function DeployConfirm() {
 }
 
 function ComTable() {
+  const [logTarget, setLogTarget] = useState(null);
   const columns = [{
     title: '申请标题',
     className: S.min80,
@@ -142,8 +144,14 @@ function ComTable() {
   }, {
     title: '操作',
     fixed: 'right',
-    className: hasPermission('deploy.request.do|deploy.request.edit|deploy.request.approve|deploy.request.del') ? S.min80 : 'none',
+    className: hasPermission('deploy.request.view|deploy.request.do|deploy.request.edit|deploy.request.approve|deploy.request.del') ? S.min80 : 'none',
     render: info => {
+      const logButton = (
+        <Action.Button
+          auth="deploy.request.view"
+          onClick={() => setLogTarget(info)}
+        >日志</Action.Button>
+      );
       switch (info.status) {
         case '-3':
           return <Action>
@@ -158,6 +166,7 @@ function ComTable() {
             {/*{info.visible_rollback && (
               <Action.Button auth="deploy.request.do" onClick={() => store.rollback(info)}>回滚</Action.Button>
             )}*/}
+            {logButton}
           </Action>;
         case '3':
           return <Action>
@@ -165,29 +174,34 @@ function ComTable() {
             {/*{info.visible_rollback && (
               <Action.Button auth="deploy.request.do" onClick={() => store.rollback(info)}>回滚</Action.Button>
             )}*/}
+            {logButton}
           </Action>;
         case '-1':
           return <Action>
             <Action.Button auth="deploy.request.edit" onClick={() => store.showForm(info)}>编辑</Action.Button>
             <Action.Button auth="deploy.request.del" onClick={() => handleDelete(info)}>删除</Action.Button>
+            {logButton}
           </Action>;
         case '0':
           return <Action>
             <Action.Button auth="deploy.request.approve" onClick={() => store.showApprove(info)}>审核</Action.Button>
             <Action.Button auth="deploy.request.edit" onClick={() => store.showForm(info)}>编辑</Action.Button>
             <Action.Button auth="deploy.request.del" onClick={() => handleDelete(info)}>删除</Action.Button>
+            {logButton}
           </Action>;
         case '1':
           return <Action>
             <DoAction info={info}/>
             <Action.Button auth="deploy.request.del" onClick={() => handleDelete(info)}>删除</Action.Button>
+            {logButton}
           </Action>;
         case '2':
           return <Action>
             <Action.Button auth="deploy.request.do" onClick={() => store.readConsole(info)}>查看</Action.Button>
+            {logButton}
           </Action>;
         default:
-          return null
+          return <Action>{logButton}</Action>
       }
     }
   }];
@@ -227,42 +241,51 @@ function ComTable() {
   }
 
   return (
-    <TableCard
-      tKey="dr"
-      rowKey={row => row.key || row.id}
-      title="申请列表"
-      columns={columns}
-      scroll={{x: 1500}}
-      tableLayout="auto"
-      loading={store.isFetching}
-      dataSource={store.dataSource}
-      onReload={store.fetchRecords}
-      actions={[
-        <AuthButton
-          auth="deploy.request.restart"
-          type="primary"
-          icon={<ReloadOutlined/>}
-          onClick={() => {store.addVisible = true; store.filterRestartVisble = true;}}>重启服务申请</AuthButton>,
-        <AuthButton
-          auth="deploy.request.add"
-          type="primary"
-          icon={<PlusOutlined/>}
-          onClick={() => store.addVisible = true}>新建发布申请</AuthButton>,
-        <Radio.Group value={store.f_status} onChange={e => store.f_status = e.target.value}>
-          <Radio.Button value="all">全部({store.counter['all'] || 0})</Radio.Button>
-          <Radio.Button value="0">待审核({store.counter['0'] || 0})</Radio.Button>
-          <Radio.Button value="1">待发布({store.counter['1'] || 0})</Radio.Button>
-          <Radio.Button value="3">发布成功({store.counter['3'] || 0})</Radio.Button>
-          <Radio.Button value="-3">发布异常({store.counter['-3'] || 0})</Radio.Button>
-          <Radio.Button value="99">其他({store.counter['99'] || 0})</Radio.Button>
-        </Radio.Group>
-      ]}
-      pagination={{
-        showSizeChanger: true,
-        showLessItems: true,
-        showTotal: total => `共 ${total} 条`,
-        pageSizeOptions: ['10', '20', '50', '100']
-      }}/>
+    <>
+      <TableCard
+        tKey="dr"
+        rowKey={row => row.key || row.id}
+        title="申请列表"
+        columns={columns}
+        scroll={{x: 1500}}
+        tableLayout="auto"
+        loading={store.isFetching}
+        dataSource={store.dataSource}
+        onReload={store.fetchRecords}
+        actions={[
+          <AuthButton
+            auth="deploy.request.restart"
+            type="primary"
+            icon={<ReloadOutlined/>}
+            onClick={() => {store.addVisible = true; store.filterRestartVisble = true;}}>重启服务申请</AuthButton>,
+          <AuthButton
+            auth="deploy.request.add"
+            type="primary"
+            icon={<PlusOutlined/>}
+            onClick={() => store.addVisible = true}>新建发布申请</AuthButton>,
+          <Radio.Group value={store.f_status} onChange={e => store.f_status = e.target.value}>
+            <Radio.Button value="all">全部({store.counter['all'] || 0})</Radio.Button>
+            <Radio.Button value="0">待审核({store.counter['0'] || 0})</Radio.Button>
+            <Radio.Button value="1">待发布({store.counter['1'] || 0})</Radio.Button>
+            <Radio.Button value="3">发布成功({store.counter['3'] || 0})</Radio.Button>
+            <Radio.Button value="-3">发布异常({store.counter['-3'] || 0})</Radio.Button>
+            <Radio.Button value="99">其他({store.counter['99'] || 0})</Radio.Button>
+          </Radio.Group>
+        ]}
+        pagination={{
+          showSizeChanger: true,
+          showLessItems: true,
+          showTotal: total => `共 ${total} 条`,
+          pageSizeOptions: ['10', '20', '50', '100']
+        }}/>
+      <OperationLog
+        visible={Boolean(logTarget)}
+        targetType="request"
+        targetId={logTarget && logTarget.id}
+        targetName={logTarget && logTarget.name}
+        onCancel={() => setLogTarget(null)}
+      />
+    </>
   )
 }
 

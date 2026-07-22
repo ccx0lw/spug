@@ -3,15 +3,17 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { observer } from 'mobx-react';
 import { Table, Tag, Space, Popconfirm, Tooltip, Progress } from 'antd';
 import { RocketOutlined, CloudServerOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { AuthButton, Action } from 'components';
 import store from './store';
 import S from './index.module.less';
+import OperationLog from 'pages/deploy/OperationLog';
 
 function ComTable() {
+  const [logTarget, setLogTarget] = useState(null);
   const getStatusColor = (status) => {
     const colors = {
       '0': 'blue',
@@ -131,6 +133,9 @@ function ComTable() {
             <Action.Button
               auth="deploy.iteration.view"
               onClick={() => store.showDetail(record)}>查看</Action.Button>
+            <Action.Button
+              auth="deploy.iteration.view"
+              onClick={() => setLogTarget(record)}>日志</Action.Button>
             {canEdit && (
               <Action.Button
                 auth="deploy.iteration.edit"
@@ -251,27 +256,36 @@ function ComTable() {
   };
 
   return (
-    <div className={S.tableCard}>
-      <Table 
-        columns={columns}
-        dataSource={store.dataSource}
-        rowKey="id"
-        pagination={{
-          pageSize: 100,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: total => `共 ${total} 条`,
-          // pageSizeOptions: ['10', '20', '50', '100']
-        }}
-        loading={store.isFetching}
-        scroll={{ x: 900 }}
-        expandable={{
-          expandedRowRender,
-          expandRowByClick: true,
-          rowExpandable: (record) => record.details && record.details.length > 0
-        }}
+    <>
+      <div className={S.tableCard}>
+        <Table
+          columns={columns}
+          dataSource={store.dataSource}
+          rowKey="id"
+          pagination={{
+            pageSize: 100,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: total => `共 ${total} 条`,
+            // pageSizeOptions: ['10', '20', '50', '100']
+          }}
+          loading={store.isFetching}
+          scroll={{ x: 900 }}
+          expandable={{
+            expandedRowRender,
+            expandRowByClick: true,
+            rowExpandable: (record) => record.details && record.details.length > 0
+          }}
+        />
+      </div>
+      <OperationLog
+        visible={Boolean(logTarget)}
+        targetType="iteration"
+        targetId={logTarget && logTarget.id}
+        targetName={logTarget && logTarget.name}
+        onCancel={() => setLogTarget(null)}
       />
-    </div>
+    </>
   )
 }
 
