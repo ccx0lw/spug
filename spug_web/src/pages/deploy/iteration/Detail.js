@@ -230,6 +230,7 @@ function Detail() {
             <Statistic
               title={<span style={{ color: '#52c41a' }}>迭代名称</span>}
               value={record.name || '-'}
+              formatter={() => record.name || '-'}
               valueStyle={{ fontSize: 16, color: '#52c41a' }}
               prefix={<RocketOutlined />}
             />
