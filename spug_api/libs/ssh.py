@@ -11,12 +11,22 @@ from uuid import uuid4
 import socket
 import time
 import re
+import shlex
+
+
+def _is_legacy_openssh(remote_version):
+    match = re.search(r'-OpenSSH_(\d+)(?:\.(\d+))?', remote_version)
+    if not match:
+        return False
+    major = int(match.group(1))
+    minor = int(match.group(2) or 0)
+    return major < 7 or (major == 7 and minor <= 7)
 
 
 def _finalize_pubkey_algorithm(self, key_type):
     if "rsa" not in key_type:
         return key_type
-    if re.search(r"-OpenSSH_(?:[1-6]|7\.[0-7])", self.transport.remote_version):
+    if _is_legacy_openssh(self.transport.remote_version):
         pubkey_algo = "ssh-rsa"
         if key_type.endswith("-cert-v01@openssh.com"):
             pubkey_algo += "-cert-v01@openssh.com"
@@ -40,7 +50,9 @@ def _finalize_pubkey_algorithm(self, key_type):
             err = "Unable to agree on a pubkey algorithm for signing a {!r} key!"  # noqa
             raise AuthenticationException(err.format(key_type))
     else:
-        pubkey_algo = "ssh-rsa"
+        # 现代 OpenSSH 默认禁用 SHA-1 的 ssh-rsa 签名，应优先使用 Paramiko
+        # 的 rsa-sha2 算法；旧版 OpenSSH 已在上面的版本分支单独兼容。
+        pubkey_algo = my_algos[0]
     if key_type.endswith("-cert-v01@openssh.com"):
         pubkey_algo += "-cert-v01@openssh.com"
     self.transport._agreed_pubkey_algorithm = pubkey_algo
@@ -124,12 +136,22 @@ class SSH:
             return False
 
     def add_public_key(self, public_key):
-        command = f'mkdir -p -m 700 ~/.ssh && \
-        echo {public_key!r} >> ~/.ssh/authorized_keys && \
-        chmod 600 ~/.ssh/authorized_keys'
+        public_key = public_key.strip() if public_key else ''
+        if not public_key:
+            raise ValueError('SSH 公钥不能为空')
+        quoted_public_key = shlex.quote(public_key)
+        command = (
+            'umask 077 && '
+            'mkdir -p "$HOME/.ssh" && '
+            'chmod 700 "$HOME/.ssh" && '
+            'touch "$HOME/.ssh/authorized_keys" && '
+            'chmod 600 "$HOME/.ssh/authorized_keys" && '
+            f'(grep -qxF {quoted_public_key} "$HOME/.ssh/authorized_keys" || '
+            f'printf \'\\n%s\\n\' {quoted_public_key} >> "$HOME/.ssh/authorized_keys")'
+        )
         exit_code, out = self.exec_command_raw(command)
         if exit_code != 0:
-            raise Exception(f'add public key error: {out}')
+            raise Exception(f'写入 SSH 公钥失败: {out}')
 
     def exec_command_raw(self, command, environment=None):
         channel = self.client.get_transport().open_session()
