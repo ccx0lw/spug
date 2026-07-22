@@ -30,7 +30,11 @@ class Command(BaseCommand):
         if target == 'mfa':
             if options['value'] != 'disable':
                 return self.echo_error(f'mfa设置，不支持的值【{options["value"]}】')
-            AppSetting.set('MFA', {'enable': False})
+            current = AppSetting.get_default('MFA', {'enable': False})
+            AppSetting.set('MFA', {
+                'enable': False,
+                'method': current.get('method', 'push'),
+            })
             self.echo_success('MFA已禁用')
         else:
             self.echo_error('未识别的操作')

@@ -13,7 +13,7 @@ import {
   BulbOutlined,
 } from '@ant-design/icons';
 import { Form, Button, Tooltip, Space, Card, Table, Input, Upload, message } from 'antd';
-import { AuthDiv, Breadcrumb } from 'components';
+import { AuthDiv, Breadcrumb, SensitiveMFA } from 'components';
 import HostSelector from 'pages/host/Selector';
 import Output from './Output';
 import { http, uniqueId } from 'libs';
@@ -29,6 +29,7 @@ function TransferIndex() {
   const [percent, setPercent] = useState()
   const [token, setToken] = useState()
   const [histories, setHistories] = useState([])
+  const [mfaVisible, setMfaVisible] = useState(false)
 
   useEffect(() => {
     if (!loading) {
@@ -44,11 +45,16 @@ function TransferIndex() {
   }
 
   function handleSubmit() {
-    const formData = new FormData();
     if (files.length === 0) return message.error('请添加数据源')
     if (!dir) return message.error('请输入目标路径')
     if (hosts.length === 0) return message.error('请选择目标主机')
-    const data = {dst_dir: dir, host_ids: hosts.map(x => x.id)}
+    setMfaVisible(true)
+  }
+
+  function handleMFAOk(ticket) {
+    setMfaVisible(false)
+    const formData = new FormData();
+    const data = {dst_dir: dir, host_ids: hosts.map(x => x.id), mfa_ticket: ticket}
     for (let index in files) {
       const item = files[index]
       if (item.type === 'host') {
@@ -177,6 +183,12 @@ function TransferIndex() {
       </div>
     </div>
     {token ? <Output token={token} onBack={handleCloseOutput}/> : null}
+    <SensitiveMFA
+      visible={mfaVisible}
+      scope="file_transfer"
+      title="文件分发安全验证"
+      onCancel={() => setMfaVisible(false)}
+      onOk={handleMFAOk}/>
   </AuthDiv>)
 }
 

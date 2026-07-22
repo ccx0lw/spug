@@ -4,8 +4,15 @@
  * Released under the AGPL-3.0 License.
  */
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Button, Tabs, Modal, message } from 'antd';
-import { UserOutlined, LockOutlined, CopyrightOutlined, GithubOutlined, MailOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Tabs, Modal, Typography, message } from 'antd';
+import {
+  UserOutlined,
+  LockOutlined,
+  CopyrightOutlined,
+  GithubOutlined,
+  MailOutlined,
+  SafetyCertificateOutlined,
+} from '@ant-design/icons';
 import styles from './login.module.css';
 import history from 'libs/history';
 import { http, updatePermissions } from 'libs';
@@ -23,6 +30,8 @@ export default function () {
   const [loginType, setLoginType] = useState(localStorage.getItem('login_type') || 'default');
   const [codeVisible, setCodeVisible] = useState(false);
   const [codeLoading, setCodeLoading] = useState(false);
+  const [mfaMethod, setMfaMethod] = useState('push');
+  const [mfaSetup, setMfaSetup] = useState();
 
   useEffect(() => {
     envStore.records = [];
@@ -46,11 +55,15 @@ export default function () {
     if (codeVisible && !formData.captcha) return message.error('请输入验证码');
     setLoading(true);
     formData['type'] = loginType;
+    if (mfaSetup) formData['mfa_setup_token'] = mfaSetup.setup_token;
     http.post('/api/account/login/', formData)
       .then(data => {
         if (data['required_mfa']) {
+          const method = data['mfa_method'] || 'push';
+          setMfaMethod(method);
+          setMfaSetup(data['mfa_setup_required'] ? data : undefined);
           setCodeVisible(true);
-          setCounter(30);
+          setCounter(method === 'push' ? 30 : 0);
           setLoading(false)
         } else if (!data['has_real_ip']) {
           Modal.warning({
@@ -94,6 +107,20 @@ export default function () {
       .finally(() => setCodeLoading(false))
   }
 
+  function resetMFA() {
+    if (!codeVisible) return;
+    setCodeVisible(false);
+    setMfaMethod('push');
+    setMfaSetup(undefined);
+    setCounter(0);
+    form.setFieldsValue({captcha: undefined})
+  }
+
+  function handleLoginType(v) {
+    setLoginType(v);
+    resetMFA()
+  }
+
   return (
     <div className={styles.container}>
       <div className={styles.titleContainer}>
@@ -101,7 +128,7 @@ export default function () {
         <div className={styles.desc}>灵活、强大、易用的开源运维平台</div>
       </div>
       <div className={styles.formContainer}>
-        <Tabs activeKey={loginType} className={styles.tabs} onTabClick={v => setLoginType(v)}>
+        <Tabs activeKey={loginType} className={styles.tabs} onTabClick={handleLoginType}>
           <Tabs.TabPane tab="普通登录" key="default"/>
           <Tabs.TabPane tab="LDAP登录" key="ldap"/>
         </Tabs>
@@ -111,6 +138,7 @@ export default function () {
               size="large"
               autoComplete="off"
               placeholder="请输入账户"
+              onChange={resetMFA}
               prefix={<UserOutlined className={styles.icon}/>}/>
           </Form.Item>
           <Form.Item name="password" className={styles.formItem}>
@@ -119,19 +147,33 @@ export default function () {
               type="password"
               autoComplete="off"
               placeholder="请输入密码"
+              onChange={resetMFA}
               onPressEnter={handleSubmit}
               prefix={<LockOutlined className={styles.icon}/>}/>
           </Form.Item>
+          {codeVisible && mfaSetup ? (
+            <div style={{marginBottom: 16, padding: 16, textAlign: 'center', background: '#fafafa'}}>
+              <div style={{marginBottom: 8, fontWeight: 500}}>首次登录，请绑定身份认证器</div>
+              <img src={mfaSetup.qr_code} alt="身份认证器二维码" style={{width: 180, height: 180}}/>
+              <div style={{marginTop: 8, color: 'rgba(0, 0, 0, .65)'}}>使用 Google Authenticator 扫描二维码</div>
+              <div style={{marginTop: 4, wordBreak: 'break-all'}}>
+                无法扫码时手动输入：<Typography.Text copyable>{mfaSetup.secret}</Typography.Text>
+              </div>
+            </div>
+          ) : null}
           <Form.Item hidden={!codeVisible} name="captcha" className={styles.formItem}>
             <div style={{display: 'flex'}}>
               <Form.Item noStyle name="captcha">
                 <Input
                   size="large"
                   autoComplete="off"
-                  placeholder="请输入验证码"
-                  prefix={<MailOutlined className={styles.icon}/>}/>
+                  maxLength={6}
+                  placeholder={mfaMethod === 'totp' ? '请输入身份认证器中的6位验证码' : '请输入验证码'}
+                  prefix={mfaMethod === 'totp' ?
+                    <SafetyCertificateOutlined className={styles.icon}/> :
+                    <MailOutlined className={styles.icon}/>}/>
               </Form.Item>
-              {counter > 0 ? (
+              {mfaMethod === 'totp' ? null : counter > 0 ? (
                 <Button disabled size="large" style={{marginLeft: 8}}>{counter} 秒后重新获取</Button>
               ) : (
                 <Button size="large" loading={codeLoading} style={{marginLeft: 8}}

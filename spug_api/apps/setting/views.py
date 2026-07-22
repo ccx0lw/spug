@@ -11,6 +11,17 @@ from libs.push import get_balance, send_login_code
 from libs.mixins import AdminView
 from apps.setting.utils import AppSetting
 from apps.setting.models import Setting, KEYS_DEFAULT
+from apps.account.mfa import (
+    MFASecretError,
+    bind_totp,
+    clear_mfa_failures,
+    clear_totp_setup,
+    create_totp_setup,
+    get_pending_totp_secret,
+    is_mfa_attempt_locked,
+    register_mfa_failure,
+    verify_user_totp,
+)
 from copy import deepcopy
 import platform
 import ldap
@@ -22,6 +33,8 @@ class SettingView(AdminView):
         for item in Setting.objects.all():
             if item.key == 'spug_push_key':
                 response[item.key] = f'{item.real_val[:8]}********{item.real_val[-8:]}'
+            elif item.key == 'MFA':
+                response[item.key] = {'method': 'push', **item.real_val}
             else:
                 response[item.key] = item.real_val
         return json_response(response)
@@ -38,6 +51,17 @@ class SettingView(AdminView):
 
 class MFAView(AdminView):
     def get(self, request):
+        method = request.GET.get('method', 'push')
+        if method == 'totp':
+            if request.user.mfa_bound:
+                return json_response({'method': 'totp', 'mfa_bound': True})
+            return json_response({
+                'method': 'totp',
+                'mfa_bound': False,
+                **create_totp_setup(request.user),
+            })
+        if method != 'push':
+            return json_response(error='不支持的MFA认证方式')
         if not request.user.wx_token:
             return json_response(
                 error='检测到当前账户未配置推送标识（账户管理/编辑），请配置后再尝试启用MFA认证，否则可能造成系统无法正常登录。')
@@ -52,22 +76,50 @@ class MFAView(AdminView):
     def post(self, request):
         form, error = JsonParser(
             Argument('enable', type=bool, help='参数错误'),
-            Argument('code', required=False)
+            Argument('code', required=False),
+            Argument(
+                'method',
+                required=False,
+                filter=lambda x: x in ('push', 'totp'),
+                help='不支持的MFA认证方式',
+            ),
+            Argument('setup_token', required=False),
         ).parse(request.body)
         if error is None:
+            current = AppSetting.get_default('MFA', {'enable': False})
+            method = form.method or current.get('method', 'push')
             if form.enable:
                 if not form.code:
                     return json_response(error='请输入验证码')
-                key = f'{request.user.username}:code'
-                code = cache.get(key)
-                if not code:
-                    return json_response(error='验证码已失效，请重新获取')
-                if code != form.code:
-                    ttl = cache.ttl(key)
-                    cache.expire(key, ttl - 100)
-                    return json_response(error='验证码错误')
-                cache.delete(key)
-            AppSetting.set('MFA', {'enable': form.enable})
+                if method == 'totp':
+                    if is_mfa_attempt_locked(request.user):
+                        return json_response(error='验证码错误次数过多，请5分钟后重试')
+                    try:
+                        if request.user.mfa_bound:
+                            verified = verify_user_totp(request.user, form.code)
+                        else:
+                            secret = get_pending_totp_secret(request.user, form.setup_token)
+                            if not secret:
+                                return json_response(error='绑定信息已失效，请重新生成二维码')
+                            verified = bind_totp(request.user, secret, form.code)
+                    except MFASecretError as exc:
+                        return json_response(error=str(exc))
+                    if not verified:
+                        register_mfa_failure(request.user)
+                        return json_response(error='验证码错误，请确认服务器时间与手机时间一致')
+                    clear_totp_setup(form.setup_token)
+                    clear_mfa_failures(request.user)
+                else:
+                    key = f'{request.user.username}:code'
+                    code = cache.get(key)
+                    if not code:
+                        return json_response(error='验证码已失效，请重新获取')
+                    if code != form.code:
+                        ttl = cache.ttl(key)
+                        cache.expire(key, ttl - 100)
+                        return json_response(error='验证码错误')
+                    cache.delete(key)
+            AppSetting.set('MFA', {'enable': form.enable, 'method': method})
         return json_response(error=error)
 
 

@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { PlusOutlined, ThunderboltOutlined, BulbOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { Form, Button, Radio, Tooltip } from 'antd';
-import { ACEditor, AuthDiv, Breadcrumb } from 'components';
+import { ACEditor, AuthDiv, Breadcrumb, SensitiveMFA } from 'components';
 import HostSelector from 'pages/host/Selector';
 import TemplateSelector from './TemplateSelector';
 import Parameter from './Parameter';
@@ -26,6 +26,8 @@ function TaskIndex() {
   const [histories, setHistories] = useState([])
   const [parameters, setParameters] = useState([])
   const [visible, setVisible] = useState(false)
+  const [mfaVisible, setMfaVisible] = useState(false)
+  const [pendingParams, setPendingParams] = useState()
 
   useEffect(() => {
     if (!loading) {
@@ -54,8 +56,21 @@ function TaskIndex() {
     if (!params && parameters.length > 0) {
       return setVisible(true)
     }
+    setPendingParams(params)
+    setMfaVisible(true)
+  }
+
+  function handleMFAOk(ticket) {
+    setMfaVisible(false)
     setLoading(true)
-    const formData = {interpreter, template_id, params, host_ids: store.host_ids, command: cleanCommand(command)}
+    const formData = {
+      interpreter,
+      template_id,
+      params: pendingParams,
+      host_ids: store.host_ids,
+      command: cleanCommand(command),
+      mfa_ticket: ticket,
+    }
     http.post('/api/exec/do/', formData)
       .then(store.switchConsole)
       .finally(() => setLoading(false))
@@ -134,6 +149,12 @@ function TaskIndex() {
       {store.showTemplate && <TemplateSelector onCancel={store.switchTemplate} onOk={handleTemplate}/>}
       {store.showConsole && <Output onBack={store.switchConsole}/>}
       {visible && <Parameter parameters={parameters} onCancel={() => setVisible(false)} onOk={v => handleSubmit(v)}/>}
+      <SensitiveMFA
+        visible={mfaVisible}
+        scope="exec_task"
+        title="执行命令安全验证"
+        onCancel={() => setMfaVisible(false)}
+        onOk={handleMFAOk}/>
     </AuthDiv>
   )
 }

@@ -8,6 +8,7 @@ import { Menu } from 'antd';
 import { Breadcrumb } from 'components';
 import Basic from './Basic';
 import Reset from './Reset';
+import MFA from './MFA';
 import styles from './index.module.css';
 
 function Index() {
@@ -28,11 +29,13 @@ function Index() {
             onSelect={({selectedKeys}) => setSelectedKeys(selectedKeys)}>
             <Menu.Item key="basic">基本设置</Menu.Item>
             <Menu.Item key="reset">修改密码</Menu.Item>
+            <Menu.Item key="mfa">身份认证器</Menu.Item>
           </Menu>
         </div>
         <div className={styles.right}>
           {selectedKeys[0] === 'basic' && <Basic/>}
           {selectedKeys[0] === 'reset' && <Reset/>}
+          {selectedKeys[0] === 'mfa' && <MFA/>}
         </div>
       </div>
     </div>

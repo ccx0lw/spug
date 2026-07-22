@@ -103,7 +103,9 @@ class FileManager extends React.Component {
     this.setState({ fetching: true });
     pwd = pwd || this.state.pwd;
     const path = '/' + pwd.join('/');
-    return http.get('/api/file/', {params: {id: this.props.id, path}})
+    return http.get('/api/file/', {
+      params: {id: this.props.id, path, mfa_ticket: this.props.mfaTicket}
+    })
       .then(res => {
         const objects = lds.orderBy(res, [this._kindSort, 'name'], ['desc', 'asc']);
         this.setState({objects, pwd})
@@ -155,6 +157,7 @@ class FileManager extends React.Component {
       formData.append('id', this.props.id);
       formData.append('token', token);
       formData.append('path', '/' + this.state.pwd.join('/'));
+      formData.append('mfa_ticket', this.props.mfaTicket);
       this.input.value = '';
       http.post('/api/file/object/', formData, {timeout: 600000, onUploadProgress: this._updateLocal})
         .then(() => {
@@ -191,7 +194,7 @@ class FileManager extends React.Component {
     const file = `/${this.state.pwd.join('/')}/${name}`;
     const link = document.createElement('a');
     link.download = name;
-    link.href = `/api/file/object/?id=${this.props.id}&file=${file}&x-token=${X_TOKEN}`;
+    link.href = `/api/file/object/?id=${this.props.id}&file=${encodeURIComponent(file)}&x-token=${X_TOKEN}&mfa_ticket=${encodeURIComponent(this.props.mfaTicket)}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -204,7 +207,9 @@ class FileManager extends React.Component {
       title: '删除文件确认',
       content: `确认删除文件：${file} ?`,
       onOk: () => {
-        return http.delete('/api/file/object/', {params: {id: this.props.id, file}})
+        return http.delete('/api/file/object/', {
+          params: {id: this.props.id, file, mfa_ticket: this.props.mfaTicket}
+        })
           .then(() => {
             message.success('删除成功');
             this.fetchFiles()

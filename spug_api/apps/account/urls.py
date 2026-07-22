@@ -12,5 +12,7 @@ urlpatterns = [
     url(r'^user/$', UserView.as_view()),
     url(r'^role/$', RoleView.as_view()),
     url(r'^self/$', SelfView.as_view()),
+    url(r'^mfa/$', UserMFAView.as_view()),
+    url(r'^mfa/sensitive/$', SensitiveMFAView.as_view()),
     url(r'^login/history/$', HistoryView.as_view())
 ]

@@ -47,7 +47,8 @@ export default observer(function () {
   }
 
   function handleUnbind() {
-    if (store.settings.MFA?.enable) {
+    const mfa = store.settings.MFA;
+    if (mfa?.enable && (mfa.method || 'push') === 'push') {
       message.error('请先关闭登录MFA认证，否则将造成无法登录');
       return
     }

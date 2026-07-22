@@ -34,7 +34,9 @@ function WebSSH(props) {
     term.open(container.current);
     term.write('WebSocket connecting ... ');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws/ssh/${props.id}/?x-token=${X_TOKEN}`);
+    const socket = new WebSocket(
+      `${protocol}//${window.location.host}/api/ws/ssh/${props.id}/?x-token=${X_TOKEN}&mfa-ticket=${encodeURIComponent(props.mfaTicket)}`
+    );
     socket.onmessage = e => term.write(e.data)
     socket.onopen = () => {
       term.write('ok')

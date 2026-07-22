@@ -7,6 +7,7 @@ from asgiref.sync import async_to_sync
 from apps.host.models import Host
 from consumer.utils import BaseConsumer
 from apps.account.utils import has_host_perm
+from apps.account.mfa import validate_sensitive_ticket
 from libs.utils import str_decode
 from threading import Thread
 import time
@@ -103,6 +104,14 @@ class SSHConsumer(BaseConsumer):
             self.ssh.close()
 
     def init(self):
+        ticket = self.query_params.get('mfa-ticket', [''])[0]
+        mfa_error = validate_sensitive_ticket(
+            self.user, 'host_console', ticket
+        )
+        if mfa_error:
+            return self.close_with_message(mfa_error)
+        if not self.user.has_perms(['host.console.view']):
+            return self.close_with_message('你当前无Web终端权限，请联系管理员授权。')
         if has_host_perm(self.user, self.id):
             self.send(text_data='\r\n正在连接至主机 ...')
             host = Host.objects.filter(pk=self.id).first()

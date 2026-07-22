@@ -8,6 +8,11 @@ from libs import json_response, JsonParser, Argument, human_datetime, auth
 from apps.exec.models import ExecTemplate, ExecHistory
 from apps.host.models import Host
 from apps.account.utils import has_host_perm
+from apps.account.mfa import (
+    authorize_sensitive_action,
+    consume_sensitive_action_authorization,
+    validate_sensitive_ticket,
+)
 import uuid
 import json
 
@@ -65,11 +70,17 @@ class TaskView(View):
             Argument('command', help='请输入执行命令内容'),
             Argument('interpreter', default='sh'),
             Argument('template_id', type=int, required=False),
-            Argument('params', type=dict, handler=json.dumps, default={})
+            Argument('params', type=dict, handler=json.dumps, default={}),
+            Argument('mfa_ticket', required=False),
         ).parse(request.body)
         if error is None:
             if not has_host_perm(request.user, form.host_ids):
                 return json_response(error='无权访问主机，请联系管理员')
+            mfa_error = validate_sensitive_ticket(
+                request.user, 'exec_task', form.pop('mfa_ticket')
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             token, rds = uuid.uuid4().hex, get_redis_connection()
             form.host_ids.sort()
             if form.template_id:
@@ -77,6 +88,7 @@ class TaskView(View):
                 if not template or template.body != form.command:
                     form.template_id = None
 
+            authorize_sensitive_action(request.user, 'exec_task', token)
             ExecHistory.objects.create(
                 user=request.user,
                 digest=token,
@@ -97,11 +109,16 @@ class TaskView(View):
             Argument('rows', type=int, required=False)
         ).parse(request.body)
         if error is None:
+            mfa_error = consume_sensitive_action_authorization(
+                request.user, 'exec_task', form.token
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             term = None
             if form.cols and form.rows:
                 term = {'width': form.cols, 'height': form.rows}
             rds = get_redis_connection()
-            task = ExecHistory.objects.get(digest=form.token)
+            task = ExecHistory.objects.get(digest=form.token, user=request.user)
             for host in Host.objects.filter(id__in=json.loads(task.host_ids)):
                 data = dict(
                     key=host.id,
@@ -118,6 +135,3 @@ class TaskView(View):
                 )
                 rds.rpush(settings.EXEC_WORKER_KEY, json.dumps(data))
         return json_response(error=error)
-
-
-

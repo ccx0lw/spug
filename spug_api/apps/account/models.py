@@ -20,6 +20,8 @@ class User(models.Model, ModelMixin):
     last_login = models.CharField(max_length=20)
     last_ip = models.CharField(max_length=50)
     wx_token = models.CharField(max_length=50, null=True)
+    mfa_secret = models.CharField(max_length=255, null=True)
+    mfa_last_counter = models.BigIntegerField(null=True)
     roles = models.ManyToManyField('Role', db_table='user_role_rel')
 
     created_at = models.CharField(max_length=20, default=human_datetime)
@@ -33,6 +35,20 @@ class User(models.Model, ModelMixin):
 
     def verify_password(self, plain_password: str) -> bool:
         return check_password(plain_password, self.password_hash)
+
+    @property
+    def mfa_bound(self) -> bool:
+        return bool(self.mfa_secret)
+
+    def to_dict(self, excludes: tuple = None, selects: tuple = None) -> dict:
+        sensitive_fields = {'mfa_secret', 'mfa_last_counter'}
+        if selects:
+            selects = tuple(field for field in selects if field not in sensitive_fields)
+            if not selects:
+                return {}
+        else:
+            excludes = tuple(set(excludes or ()).union(sensitive_fields))
+        return super().to_dict(excludes=excludes, selects=selects)
 
     def get_perms_cache(self):
         return cache.get(f'perms_{self.id}', set())

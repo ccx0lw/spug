@@ -7,6 +7,11 @@ from django.db import close_old_connections
 from django_redis import get_redis_connection
 from apps.exec.models import Transfer
 from apps.account.utils import has_host_perm
+from apps.account.mfa import (
+    authorize_sensitive_action,
+    consume_sensitive_action_authorization,
+    validate_sensitive_ticket,
+)
 from apps.host.models import Host
 from apps.setting.utils import AppSetting
 from libs import json_response, JsonParser, Argument, auth
@@ -34,10 +39,16 @@ class TransferView(View):
             Argument('host', required=False),
             Argument('dst_dir', help='请输入目标路径'),
             Argument('host_ids', type=list, filter=lambda x: len(x), help='请选择目标主机'),
+            Argument('mfa_ticket', required=False),
         ).parse(data)
         if error is None:
             if not has_host_perm(request.user, form.host_ids):
                 return json_response(error='无权访问主机，请联系管理员')
+            mfa_error = validate_sensitive_ticket(
+                request.user, 'file_transfer', form.pop('mfa_ticket')
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             host_id = None
             token = uuid.uuid4().hex
             base_dir = os.path.join(settings.TRANSFER_DIR, token)
@@ -71,6 +82,7 @@ class TransferView(View):
                         for chunk in file.chunks():
                             f.write(chunk)
                     index += 1
+            authorize_sensitive_action(request.user, 'file_transfer', token)
             Transfer.objects.create(
                 user=request.user,
                 digest=token,
@@ -88,7 +100,12 @@ class TransferView(View):
             Argument('token', help='参数错误')
         ).parse(request.body)
         if error is None:
-            task = Transfer.objects.get(digest=form.token)
+            mfa_error = consume_sensitive_action_authorization(
+                request.user, 'file_transfer', form.token
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
+            task = Transfer.objects.get(digest=form.token, user=request.user)
             Thread(target=_dispatch_sync, args=(task,)).start()
         return json_response(error=error)
 

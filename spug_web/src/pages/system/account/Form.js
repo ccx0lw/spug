@@ -69,10 +69,10 @@ export default observer(function () {
         </Form.Item>
         <Form.Item
           name="wx_token"
-          label="MFA标识"
+          label="推送MFA标识"
           extra={(
             <span>
-              如果启用了MFA（两步验证）则该项为必填。
+              如果启用了推送方式的MFA（两步验证）则该项为必填。
               <a target="_blank" rel="noopener noreferrer" href="https://push.spug.cc/guide/spug">如何获取MFA标识？</a>
             </span>)}>
           <Select showSearch allowClear filterOption={(i, o) => includes(o.children, i)}

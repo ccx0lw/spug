@@ -20,7 +20,7 @@ import {
   LeftOutlined,
   SkinFilled,
 } from '@ant-design/icons';
-import { NotFound, AuthButton } from 'components';
+import { NotFound, AuthButton, SensitiveMFA } from 'components';
 import Terminal from './Terminal';
 import FileManager from './FileManager';
 import Setting from './Setting';
@@ -45,15 +45,20 @@ function WebSSH(props) {
   const [hostId, setHostId] = useState();
   const [width, setWidth] = useState(280);
   const [sshMode] = useState(hasPermission('host.console.view'))
+  const [mfaTicket, setMfaTicket] = useState()
 
   useEffect(() => {
     window.document.title = 'Spug web terminal'
     window.addEventListener('beforeunload', leaveTips)
-    fetchNodes()
     gStore.fetchUserSettings()
     return () => window.removeEventListener('beforeunload', leaveTips)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (mfaTicket) fetchNodes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mfaTicket])
 
   useEffect(() => {
     if (searchValue) {
@@ -218,7 +223,22 @@ function WebSSH(props) {
     '/____// .___/ \\__,_/ \\__, /    |__/|__/ \\___//_.___/   \\__/ \\___//_/   /_/ /_/ /_//_//_/ /_/ \\__,_//_/   \n' +
     '     /_/            /____/                                                                               \n'
 
-  return hasPermission('host.console.view|host.console.list') ? (
+  if (!hasPermission('host.console.view|host.console.list')) {
+    return <div style={{height: '100vh'}}><NotFound/></div>
+  }
+  if (!mfaTicket) {
+    return (
+      <div style={{height: '100vh', background: '#f0f2f5'}}>
+        <SensitiveMFA
+          visible
+          scope="host_console"
+          title="Web终端安全验证"
+          onCancel={() => props.history.push('/host')}
+          onOk={ticket => setMfaTicket(ticket)}/>
+      </div>
+    )
+  }
+  return (
     <div className={styles.container} onMouseUp={() => posX = 0} onMouseMove={handleMouseMove}>
       <div className={styles.sider} style={{width}}>
         <a className={styles.logo} href="/host" target="_blank">
@@ -265,10 +285,10 @@ function WebSSH(props) {
           {hosts.map(item => (
             <Tabs.TabPane key={item.vId} tab={<TabRender host={item}/>}>
               {sshMode ? (
-                <Terminal id={item.id} vId={item.vId} activeId={activeId}/>
+                <Terminal id={item.id} vId={item.vId} activeId={activeId} mfaTicket={mfaTicket}/>
               ) : (
                 <div className={styles.fileManger}>
-                  <FileManager id={item.id}/>
+                  <FileManager id={item.id} mfaTicket={mfaTicket}/>
                 </div>
               )}
             </Tabs.TabPane>
@@ -285,13 +305,9 @@ function WebSSH(props) {
         className={styles.drawerContainer}
         visible={visible}
         onClose={() => setVisible(false)}>
-        <FileManager id={hostId}/>
+        <FileManager id={hostId} mfaTicket={mfaTicket}/>
       </Drawer>
       <Setting visible={visible2} onClose={() => setVisible2(false)}/>
-    </div>
-  ) : (
-    <div style={{height: '100vh'}}>
-      <NotFound/>
     </div>
   )
 }

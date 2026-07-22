@@ -19,6 +19,7 @@ class BaseConsumer(WebsocketConsumer):
     def __init__(self, *args, **kwargs):
         super(BaseConsumer, self).__init__(*args, **kwargs)
         self.user = None
+        self.query_params = {}
 
     def close_with_message(self, content):
         self.send(text_data=f'\r\n\x1b[31m{content}\x1b[0m\r\n')
@@ -28,8 +29,9 @@ class BaseConsumer(WebsocketConsumer):
         self.accept()
         close_old_connections()
         query_string = self.scope['query_string'].decode()
+        self.query_params = parse_qs(query_string)
         x_real_ip = get_real_ip(self.scope['headers'])
-        token = parse_qs(query_string).get('x-token', [''])[0]
+        token = self.query_params.get('x-token', [''])[0]
         if token and len(token) == 32:
             user = User.objects.filter(access_token=token).first()
             if user and user.token_expired >= time.time() and user.is_active:

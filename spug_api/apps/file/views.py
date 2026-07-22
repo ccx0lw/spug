@@ -5,6 +5,7 @@ from django.views.generic import View
 from django_redis import get_redis_connection
 from apps.host.models import Host
 from apps.account.utils import has_host_perm
+from apps.account.mfa import validate_sensitive_ticket
 from apps.file.utils import FileResponseAfter, fetch_dir_list
 from libs import json_response, JsonParser, Argument, auth
 from functools import partial
@@ -16,11 +17,17 @@ class FileView(View):
     def get(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='参数错误'),
-            Argument('path', help='参数错误')
+            Argument('path', help='参数错误'),
+            Argument('mfa_ticket', required=False),
         ).parse(request.GET)
         if error is None:
             if not has_host_perm(request.user, form.id):
                 return json_response(error='无权访问主机，请联系管理员')
+            mfa_error = validate_sensitive_ticket(
+                request.user, 'host_console', form.mfa_ticket
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             host = Host.objects.get(pk=form.id)
             if not host:
                 return json_response(error='未找到指定主机')
@@ -34,11 +41,17 @@ class ObjectView(View):
     def get(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='参数错误'),
-            Argument('file', help='请输入文件路径')
+            Argument('file', help='请输入文件路径'),
+            Argument('mfa_ticket', required=False),
         ).parse(request.GET)
         if error is None:
             if not has_host_perm(request.user, form.id):
                 return json_response(error='无权访问主机，请联系管理员')
+            mfa_error = validate_sensitive_ticket(
+                request.user, 'host_console', form.mfa_ticket
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             host = Host.objects.filter(pk=form.id).first()
             if not host:
                 return json_response(error='未找到指定主机')
@@ -55,10 +68,16 @@ class ObjectView(View):
             Argument('id', type=int, help='参数错误'),
             Argument('token', help='参数错误'),
             Argument('path', help='参数错误'),
+            Argument('mfa_ticket', required=False),
         ).parse(request.POST)
         if error is None:
             if not has_host_perm(request.user, form.id):
                 return json_response(error='无权访问主机，请联系管理员')
+            mfa_error = validate_sensitive_ticket(
+                request.user, 'host_console', form.mfa_ticket
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             file = request.FILES.get('file')
             if not file:
                 return json_response(error='请选择要上传的文件')
@@ -75,11 +94,17 @@ class ObjectView(View):
     def delete(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='参数错误'),
-            Argument('file', help='请输入文件路径')
+            Argument('file', help='请输入文件路径'),
+            Argument('mfa_ticket', required=False),
         ).parse(request.GET)
         if error is None:
             if not has_host_perm(request.user, form.id):
                 return json_response(error='无权访问主机，请联系管理员')
+            mfa_error = validate_sensitive_ticket(
+                request.user, 'host_console', form.mfa_ticket
+            )
+            if mfa_error:
+                return json_response(error=mfa_error)
             host = Host.objects.get(pk=form.id)
             if not host:
                 return json_response(error='未找到指定主机')
