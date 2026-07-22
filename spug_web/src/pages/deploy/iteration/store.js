@@ -17,6 +17,7 @@ class Store {
   @observable publishVisible = false;
   @observable publishStatus = [];  // 按环境分组的发布状态
   @observable isPublishing = false;
+  @observable requestDetailId = null;
 
   @observable f_name;
   @observable f_env_id;
@@ -108,6 +109,15 @@ class Store {
   closeDetail = () => {
     this.record = {};
     this.detailVisible = false;
+    this.requestDetailId = null;
+  };
+
+  showRequestDetail = (requestId) => {
+    this.requestDetailId = requestId;
+  };
+
+  closeRequestDetail = () => {
+    this.requestDetailId = null;
   };
 
   // 获取单个迭代的详细信息
@@ -138,6 +148,7 @@ class Store {
     this.record = {};
     this.publishVisible = false;
     this.publishStatus = [];
+    this.requestDetailId = null;
     // 关闭时自动刷新迭代列表
     this.fetchRecords();
   };

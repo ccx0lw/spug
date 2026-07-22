@@ -642,10 +642,38 @@ def get_request_info(request):
         Argument('id', type=int, help='参数错误')
     ).parse(request.GET)
     if error is None:
-        req = DeployRequest.objects.get(pk=form.id)
-        response = req.to_dict(selects=('status', 'reason'))
+        req = DeployRequest.objects.select_related(
+            'deploy',
+            'deploy__app',
+            'deploy__env',
+            'created_by',
+            'approve_by',
+            'do_by',
+        ).filter(pk=form.id).first()
+        if not req:
+            return json_response(error='未找到指定发布申请')
+        response = req.to_dict(selects=(
+            'id',
+            'name',
+            'type',
+            'status',
+            'reason',
+            'version',
+            'desc',
+            'created_at',
+            'approve_at',
+            'do_at',
+        ))
         response['fail_host_ids'] = json.loads(req.fail_host_ids)
         response['status_alias'] = req.get_status_display()
+        response['type_alias'] = req.get_type_display()
+        response['app_extend'] = req.deploy.extend
+        response['app_name'] = req.deploy.app.name
+        response['env_name'] = req.deploy.env.name
+        response['env_prod'] = req.deploy.env.prod
+        response['created_by_user'] = req.created_by.nickname
+        response['approve_by_user'] = req.approve_by.nickname if req.approve_by else None
+        response['do_by_user'] = req.do_by.nickname if req.do_by else None
         response.update(get_deploy_retry_info(req))
         return json_response(response)
     return json_response(error=error)

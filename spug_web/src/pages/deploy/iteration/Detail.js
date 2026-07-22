@@ -14,8 +14,10 @@ import {
   AppstoreOutlined,
   CloudServerOutlined,
   SyncOutlined,
-  CloseCircleOutlined
+  CloseCircleOutlined,
+  EyeOutlined
 } from '@ant-design/icons';
+import { AuthButton } from 'components';
 import store from './store';
 
 function Detail() {
@@ -164,6 +166,16 @@ function Detail() {
               <Tag color={statusColor} style={{ fontSize: 10 }}>{detail.status_alias}</Tag>
             )}
             {getImageStatusIcon()}
+            {detail.request_id ? (
+              <AuthButton
+                auth="deploy.request.view"
+                type="link"
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => store.showRequestDetail(detail.request_id)}>
+                查看申请
+              </AuthButton>
+            ) : null}
           </div>
         );
       }

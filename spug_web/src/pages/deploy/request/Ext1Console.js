@@ -11,6 +11,7 @@ import OutView from './OutView';
 import { http, X_TOKEN } from 'libs';
 import styles from './index.module.less';
 import store from './store';
+import RequestSummary from './RequestSummary';
 
 function Ext1Console(props) {
   const outputs = useLocalStore(() => ({}));
@@ -18,6 +19,7 @@ function Ext1Console(props) {
   const [mini, setMini] = useState(false);
   const [visible, setVisible] = useState(true);
   const [fetching, setFetching] = useState(true);
+  const allowMinimize = props.allowMinimize !== false;
 
   useEffect(props.request.mode === 'read' ? readDeploy : doDeploy, [])
 
@@ -47,7 +49,7 @@ function Ext1Console(props) {
         setTimeout(() => {
           setFetching(false)
           setVisible(false)
-          store.leaveConsole()
+          closeConsole()
         }, 100)
       });
     return () => socket && socket.close()
@@ -99,6 +101,14 @@ function Ext1Console(props) {
     setVisible(false)
   }
 
+  function closeConsole() {
+    if (props.onClose) {
+      props.onClose()
+    } else {
+      store.showConsole(props.request, true)
+    }
+  }
+
   function handleSetTerm(term, key) {
     if (outputs[key] && outputs[key].data) {
       term.write(outputs[key].data)
@@ -114,14 +124,14 @@ function Ext1Console(props) {
   let {local, ...hosts} = outputs;
   return (
     <div>
-      {mini && (
+      {mini && allowMinimize && (
         <Card
           className={styles.item}
           bodyStyle={{padding: '8px 12px'}}
           onClick={() => setVisible(true)}>
           <div className={styles.header}>
             <div className={styles.title}>{props.request.name}</div>
-            <CloseOutlined onClick={() => store.showConsole(props.request, true)}/>
+            <CloseOutlined onClick={closeConsole}/>
           </div>
           {local && (
             <Progress
@@ -142,14 +152,15 @@ function Ext1Console(props) {
         footer={null}
         maskClosable={false}
         className={styles.console}
-        onCancel={() => store.showConsole(props.request, true)}
+        onCancel={closeConsole}
         title={[
           <span key="1">{props.request.name}</span>,
-          <div key="2" className={styles.miniIcon} onClick={switchMiniMode}>
+          allowMinimize ? <div key="2" className={styles.miniIcon} onClick={switchMiniMode}>
             <ShrinkOutlined/>
-          </div>
+          </div> : null
         ]}>
         <Skeleton loading={fetching} active>
+          {props.showSummary ? <RequestSummary request={props.request}/> : null}
           {local && (
             <Collapse defaultActiveKey={['0']} className={styles.collapse} style={{marginBottom: 24}}>
               <Collapse.Panel header={(

@@ -11,6 +11,7 @@ import OutView from './OutView';
 import { http, X_TOKEN } from 'libs';
 import styles from './index.module.less';
 import store from './store';
+import RequestSummary from './RequestSummary';
 
 function Ext2Console(props) {
   const terms = useLocalStore(() => ({}));
@@ -20,6 +21,7 @@ function Ext2Console(props) {
   const [mini, setMini] = useState(false);
   const [visible, setVisible] = useState(true);
   const [fetching, setFetching] = useState(true);
+  const allowMinimize = props.allowMinimize !== false;
 
   useEffect(props.request.mode === 'read' ? readDeploy : doDeploy, [])
 
@@ -100,6 +102,14 @@ function Ext2Console(props) {
     setVisible(false)
   }
 
+  function closeConsole() {
+    if (props.onClose) {
+      props.onClose()
+    } else {
+      store.showConsole(props.request, true)
+    }
+  }
+
   function handleSetTerm(term, key) {
     if (outputs[key] && outputs[key].data) {
       term.write(outputs[key].data)
@@ -115,14 +125,14 @@ function Ext2Console(props) {
   const hostOutputs = Object.values(outputs).filter(x => x.id !== 'local');
   return (
     <div>
-      {mini && (
+      {mini && allowMinimize && (
         <Card
           className={styles.item}
           bodyStyle={{padding: '8px 12px'}}
           onClick={() => setVisible(true)}>
           <div className={styles.header}>
             <div className={styles.title}>{props.request.name}</div>
-            <CloseOutlined onClick={() => store.showConsole(props.request, true)}/>
+            <CloseOutlined onClick={closeConsole}/>
           </div>
           <Progress percent={(outputs.local.step + 1) * (90 / (1 + sActions.length)).toFixed(0)}
                     status={outputs.local.step === 100 ? 'success' : outputs.local.status === 'error' ? 'exception' : 'active'}/>
@@ -140,14 +150,15 @@ function Ext2Console(props) {
         footer={null}
         maskClosable={false}
         className={styles.console}
-        onCancel={() => store.showConsole(props.request, true)}
+        onCancel={closeConsole}
         title={[
           <span key="1">{props.request.name}</span>,
-          <div key="2" className={styles.miniIcon} onClick={switchMiniMode}>
+          allowMinimize ? <div key="2" className={styles.miniIcon} onClick={switchMiniMode}>
             <ShrinkOutlined/>
-          </div>
+          </div> : null
         ]}>
         <Skeleton loading={fetching} active>
+          {props.showSummary ? <RequestSummary request={props.request}/> : null}
           {sActions.length > 0 && (
             <Collapse defaultActiveKey={['0']} className={styles.collapse}>
               <Collapse.Panel header={(

@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
 import { Modal, Card, Row, Col, Tag, Button, Table, Progress, Space, message, Badge, Tooltip, Alert, Select } from 'antd';
-import { 
+import {
   RocketOutlined, 
   CheckCircleOutlined, 
   CloseCircleOutlined, 
@@ -21,7 +21,7 @@ import {
   EditOutlined,
   DeleteOutlined
 } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { AuthButton } from 'components';
 import { http } from 'libs';
 import store from './store';
 import S from './index.module.less';
@@ -499,11 +499,14 @@ function Publish() {
         return (
           <Space size={4}>
             {requestId && (
-              <Link to={`/deploy/request?id=${requestId}`}>
-                <Button type="link" size="small" icon={<EyeOutlined />}>
-                  查看
-                </Button>
-              </Link>
+              <AuthButton
+                auth="deploy.request.view"
+                type="link"
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => store.showRequestDetail(requestId)}>
+                查看
+              </AuthButton>
             )}
             {canRemove && (
               <Tooltip title="移除未预传镜像且待发布的应用">

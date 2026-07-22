@@ -17,6 +17,7 @@ import ComTable from './Table';
 import Form from './Form';
 import Detail from './Detail';
 import Publish from './Publish';
+import RequestDetail from 'pages/deploy/request/Detail';
 
 function Index() {
   useEffect(() => {
@@ -90,6 +91,11 @@ function Index() {
       {store.formVisible && <Form/>}
       {store.detailVisible && <Detail/>}
       {store.publishVisible && <Publish/>}
+      {store.requestDetailId && (
+        <RequestDetail
+          requestId={store.requestDetailId}
+          onClose={store.closeRequestDetail}/>
+      )}
     </AuthDiv>
   )
 }
