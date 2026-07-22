@@ -1,13 +1,25 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from django.test import SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 
 from apps.account.models import User
 from apps.app.models import App, Deploy
 from apps.config.models import Environment
-from apps.deploy.models import DeployIteration, DeployIterationDetail, DeployRequest
+from apps.deploy.models import (
+    DeployIteration,
+    DeployIterationDetail,
+    DeployOperationLog,
+    DeployRequest,
+)
+from apps.deploy.views import (
+    IterationDetailView,
+    OperationLogView,
+    RequestView,
+    get_request_info,
+)
 from apps.deploy.utils import (
     get_cross_iteration_warnings,
     get_iteration_detail_remove_error,
@@ -28,6 +40,7 @@ class CrossIterationWarningTests(TestCase):
             access_token='test-token',
             last_login='',
             last_ip='',
+            is_supper=True,
         )
         self.env = Environment.objects.create(
             name='测试环境',
@@ -76,6 +89,51 @@ class CrossIterationWarningTests(TestCase):
             do_at='2026-07-21 10:00:00',
             created_by=self.user,
         )
+
+    def create_failed_detail(self, iteration_name, failed_at):
+        failed_iteration = DeployIteration.objects.create(
+            name=iteration_name,
+            env=self.env,
+            status='-3',
+            created_by=self.user,
+        )
+        failed_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name=f'迭代：{iteration_name}',
+            type='1',
+            extra='[]',
+            host_ids='[]',
+            status='-3',
+            version='v1.0.0',
+            do_at=failed_at,
+            failed_at=failed_at,
+            created_by=self.user,
+        )
+        return self.create_detail(
+            failed_iteration,
+            'v1.0.0',
+            status='3',
+            request_id=failed_request.id,
+        )
+
+    def update_detail_version(self, detail_id, version):
+        request = RequestFactory().put(
+            '/api/deploy/iteration/detail/',
+            data=json.dumps({'detail_id': detail_id, 'version': version}),
+            content_type='application/json',
+        )
+        request.user = self.user
+        response = IterationDetailView.as_view()(request)
+        return json.loads(response.content.decode('utf-8'))
+
+    def get_operation_logs(self, target_type, target_id):
+        request = RequestFactory().get(
+            '/api/deploy/operation-log/',
+            data={'target_type': target_type, 'target_id': target_id},
+        )
+        request.user = self.user
+        response = OperationLogView.as_view()(request)
+        return json.loads(response.content.decode('utf-8'))
 
     def test_later_iteration_success_is_shown_as_version_switch(self):
         current_detail = self.create_detail(self.iteration, 'v1.0.0')
@@ -156,31 +214,8 @@ class CrossIterationWarningTests(TestCase):
 
     def test_other_retryable_failed_iteration_is_included_in_warning(self):
         current_detail = self.create_detail(self.iteration, 'v2.0.0')
-        failed_iteration = DeployIteration.objects.create(
-            name='失败迭代',
-            env=self.env,
-            status='-3',
-            created_by=self.user,
-        )
         failed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        failed_request = DeployRequest.objects.create(
-            deploy=self.deploy,
-            name='迭代：失败迭代',
-            type='1',
-            extra='[]',
-            host_ids='[]',
-            status='-3',
-            version='v1.0.0',
-            do_at=failed_at,
-            failed_at=failed_at,
-            created_by=self.user,
-        )
-        self.create_detail(
-            failed_iteration,
-            'v1.0.0',
-            status='3',
-            request_id=failed_request.id,
-        )
+        self.create_failed_detail('失败迭代', failed_at)
 
         warning = get_cross_iteration_warnings(
             self.iteration,
@@ -191,6 +226,255 @@ class CrossIterationWarningTests(TestCase):
         self.assertIn('其他失败迭代仍可重试', warning['message'])
         self.assertTrue(
             warning['related_iterations'][0]['request_retry_allowed']
+        )
+
+    def test_expired_failed_iteration_is_not_cross_iteration_duplicate(self):
+        current_detail = self.create_detail(self.iteration, 'v2.0.0')
+        failed_at = (datetime.now() - timedelta(hours=25)).strftime(
+            '%Y-%m-%d %H:%M:%S'
+        )
+        self.create_failed_detail('已过期失败迭代', failed_at)
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertFalse(warning['has_warning'])
+        self.assertEqual('none', warning['kind'])
+        self.assertEqual([], warning['related_iterations'])
+
+    def test_retry_disabled_failure_is_not_cross_iteration_duplicate(self):
+        self.env.deploy_retry_hours = 0
+        self.env.save()
+        current_detail = self.create_detail(self.iteration, 'v2.0.0')
+        failed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.create_failed_detail('禁止重试迭代', failed_at)
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertFalse(warning['has_warning'])
+        self.assertEqual([], warning['related_iterations'])
+
+    def test_non_retryable_current_failure_has_no_cross_iteration_duplicate(self):
+        failed_at = (datetime.now() - timedelta(hours=25)).strftime(
+            '%Y-%m-%d %H:%M:%S'
+        )
+        failed_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='迭代：当前迭代',
+            type='1',
+            extra='[]',
+            host_ids='[]',
+            status='-3',
+            version='v1.0.0',
+            do_at=failed_at,
+            failed_at=failed_at,
+            created_by=self.user,
+        )
+        current_detail = self.create_detail(
+            self.iteration,
+            'v1.0.0',
+            status='3',
+            request_id=failed_request.id,
+        )
+        other_iteration = DeployIteration.objects.create(
+            name='其他待发布迭代',
+            env=self.env,
+            created_by=self.user,
+        )
+        self.create_detail(other_iteration, 'v2.0.0')
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertFalse(warning['has_warning'])
+        self.assertEqual('none', warning['kind'])
+        self.assertEqual([], warning['related_iterations'])
+
+    def test_retryable_current_failure_keeps_cross_iteration_duplicate(self):
+        failed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        failed_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='迭代：当前迭代',
+            type='1',
+            extra='[]',
+            host_ids='[]',
+            status='-3',
+            version='v1.0.0',
+            do_at=failed_at,
+            failed_at=failed_at,
+            created_by=self.user,
+        )
+        current_detail = self.create_detail(
+            self.iteration,
+            'v1.0.0',
+            status='3',
+            request_id=failed_request.id,
+        )
+        other_iteration = DeployIteration.objects.create(
+            name='其他待发布迭代',
+            env=self.env,
+            created_by=self.user,
+        )
+        self.create_detail(other_iteration, 'v2.0.0')
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertTrue(warning['has_warning'])
+        self.assertEqual('cross_iteration', warning['kind'])
+        self.assertEqual(1, len(warning['related_iterations']))
+
+    def test_expired_failed_detail_cannot_update_version(self):
+        failed_at = (datetime.now() - timedelta(hours=25)).strftime(
+            '%Y-%m-%d %H:%M:%S'
+        )
+        detail = self.create_failed_detail('已过期失败迭代', failed_at)
+
+        response = self.update_detail_version(detail.id, 'v2.0.0')
+
+        self.assertIn('过期', response['error'])
+        detail.refresh_from_db()
+        self.assertEqual('v1.0.0', detail.version)
+        self.assertEqual('3', detail.status)
+        self.assertIsNotNone(detail.request_id)
+        self.assertFalse(DeployOperationLog.objects.filter(
+            target_type='iteration',
+            target_id=detail.iteration_id,
+        ).exists())
+
+    def test_retryable_failed_detail_can_update_version(self):
+        failed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        detail = self.create_failed_detail('可重试失败迭代', failed_at)
+
+        response = self.update_detail_version(detail.id, 'v2.0.0')
+
+        self.assertEqual('', response['error'])
+        detail.refresh_from_db()
+        self.assertEqual('v2.0.0', detail.version)
+        self.assertEqual('0', detail.status)
+        self.assertIsNone(detail.request_id)
+        operation_log = DeployOperationLog.objects.get(
+            target_type='iteration',
+            target_id=detail.iteration_id,
+        )
+        self.assertEqual(self.user.id, operation_log.operator_id)
+        self.assertEqual('测试用户', operation_log.operator_name)
+        self.assertEqual(
+            '修改应用【订单服务】版本（环境【测试环境】）',
+            operation_log.action,
+        )
+
+        response = self.get_operation_logs('iteration', detail.iteration_id)
+        self.assertEqual('', response['error'])
+        self.assertEqual(
+            {'id', 'operator_name', 'action', 'created_at'},
+            set(response['data'][0]),
+        )
+
+    def test_delete_request_records_operation_log(self):
+        deploy_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='待删除发布申请',
+            type='1',
+            extra='[]',
+            host_ids='[]',
+            status='1',
+            version='v1.0.0',
+            created_by=self.user,
+        )
+        request = RequestFactory().delete(
+            f'/api/deploy/request/?id={deploy_request.id}'
+        )
+        request.user = self.user
+
+        response = RequestView.as_view()(request)
+        response_data = json.loads(response.content.decode('utf-8'))
+
+        self.assertEqual('', response_data['error'])
+        self.assertFalse(DeployRequest.objects.filter(pk=deploy_request.id).exists())
+        operation_log = DeployOperationLog.objects.get(
+            target_type='request',
+            target_id=deploy_request.id,
+        )
+        self.assertEqual('删除发布申请', operation_log.action)
+        self.assertEqual('测试用户', operation_log.operator_name)
+
+    def test_request_info_contains_direct_detail_metadata(self):
+        deploy_request = self.create_success_request(
+            'v2.1.0',
+            name='迭代发布申请详情',
+        )
+        request = RequestFactory().get(
+            '/api/deploy/request/info/',
+            data={'id': deploy_request.id},
+        )
+        request.user = self.user
+
+        response = get_request_info(request)
+        payload = json.loads(response.content.decode('utf-8'))
+
+        self.assertFalse(payload['error'])
+        self.assertEqual(deploy_request.id, payload['data']['id'])
+        self.assertEqual('迭代发布申请详情', payload['data']['name'])
+        self.assertEqual('订单服务', payload['data']['app_name'])
+        self.assertEqual('测试环境', payload['data']['env_name'])
+        self.assertEqual('1', payload['data']['app_extend'])
+        self.assertEqual('发布成功', payload['data']['status_alias'])
+
+    def test_remove_iteration_detail_log_contains_environment(self):
+        other_env = Environment.objects.create(
+            name='预发布环境',
+            key='staging',
+            created_by=self.user,
+        )
+        other_app = App.objects.create(
+            name='库存服务',
+            key='inventory-service',
+            created_by=self.user,
+        )
+        other_deploy = Deploy.objects.create(
+            app=other_app,
+            env=other_env,
+            host_ids='[]',
+            extend='1',
+            is_audit=False,
+            rst_notify='[]',
+            created_by=self.user,
+        )
+        self.create_detail(self.iteration, 'v1.0.0')
+        removed_detail = DeployIterationDetail.objects.create(
+            iteration=self.iteration,
+            deploy=other_deploy,
+            version='v2.0.0',
+            created_by=self.user,
+        )
+        request = RequestFactory().delete(
+            f'/api/deploy/iteration/detail/?detail_id={removed_detail.id}'
+        )
+        request.user = self.user
+
+        response = IterationDetailView.as_view()(request)
+        payload = json.loads(response.content.decode('utf-8'))
+
+        self.assertFalse(payload['error'])
+        self.assertFalse(DeployIterationDetail.objects.filter(pk=removed_detail.id).exists())
+        operation_log = DeployOperationLog.objects.get(
+            target_type='iteration',
+            target_id=self.iteration.id,
+            action__startswith='移除应用',
+        )
+        self.assertEqual(
+            '移除应用【库存服务】（环境【预发布环境】）',
+            operation_log.action,
         )
 
 
