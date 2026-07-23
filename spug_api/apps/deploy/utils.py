@@ -345,6 +345,11 @@ def get_cross_iteration_warnings(iteration, details):
                 and target_version is not None
                 and target_version > latest_version
             )
+            is_version_downgrade = (
+                latest_version is not None
+                and target_version is not None
+                and target_version < latest_version
+            )
             latest_success = {
                 'request_id': latest_req.id,
                 'request_name': latest_req.name,
@@ -363,20 +368,29 @@ def get_cross_iteration_warnings(iteration, details):
                 kind = 'same_version'
                 label = '相同版本'
                 messages.append(f'最近成功发布版本同为 {detail.version}')
-            elif not is_version_upgrade:
+            elif is_version_downgrade:
                 level = 'warning'
                 kind = 'version_switch'
-                label = '版本切换提示'
+                label = '版本回滚'
                 if latest_detail and latest_detail.iteration_id > iteration.id:
                     messages.append(
-                        f'后续迭代【{latest_detail.iteration.name}】已发布 '
-                        f'{latest_req.version}，本次将切换为 {detail.version}'
+                        f'当前环境运行版本为 {latest_req.version}'
+                        f'（来自后续迭代【{latest_detail.iteration.name}】），'
+                        f'高于待发布版本 {detail.version}；继续发布将执行版本回滚'
                     )
                 else:
                     messages.append(
-                        f'最近成功版本为 {latest_req.version}，本次将切换为 '
-                        f'{detail.version}，可能属于回滚'
+                        f'当前环境运行版本为 {latest_req.version}，'
+                        f'高于待发布版本 {detail.version}；继续发布将执行版本回滚'
                     )
+            elif not is_version_upgrade:
+                level = 'warning'
+                kind = 'version_switch'
+                label = '版本变更'
+                messages.append(
+                    f'当前环境运行版本为 {latest_req.version}，待发布版本为 '
+                    f'{detail.version}；版本格式无法比较，请确认发布方向'
+                )
 
         # 跨迭代重复只对仍可执行发布动作的明细有意义。失败且已超过重试
         # 有效期的明细不能再次发布，不应再与其他迭代形成重复提示。

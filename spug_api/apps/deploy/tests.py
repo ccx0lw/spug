@@ -408,7 +408,11 @@ class CrossIterationWarningTests(TestCase):
         self.assertTrue(warning['has_warning'])
         self.assertEqual('version_switch', warning['kind'])
         self.assertEqual('warning', warning['level'])
-        self.assertIn('后续迭代【后续迭代】已发布 v2.0.0', warning['message'])
+        self.assertEqual('版本回滚', warning['label'])
+        self.assertIn('当前环境运行版本为 v2.0.0', warning['message'])
+        self.assertIn('来自后续迭代【后续迭代】', warning['message'])
+        self.assertIn('高于待发布版本 v1.0.0', warning['message'])
+        self.assertIn('继续发布将执行版本回滚', warning['message'])
         self.assertEqual(later_iteration.id, warning['latest_success']['iteration_id'])
 
     def test_same_latest_version_is_shown_without_blocking(self):
@@ -485,7 +489,10 @@ class CrossIterationWarningTests(TestCase):
 
         self.assertTrue(warning['has_warning'])
         self.assertEqual('version_switch', warning['kind'])
-        self.assertIn('可能属于回滚', warning['message'])
+        self.assertEqual('版本回滚', warning['label'])
+        self.assertIn('当前环境运行版本为 v1.0.3', warning['message'])
+        self.assertIn('高于待发布版本 v1.0.2', warning['message'])
+        self.assertIn('继续发布将执行版本回滚', warning['message'])
 
     def test_other_pending_iteration_is_included_in_warning(self):
         current_detail = self.create_detail(self.iteration, 'v1.0.0')
