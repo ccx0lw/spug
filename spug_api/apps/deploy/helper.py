@@ -17,6 +17,10 @@ class SpugError(Exception):
     pass
 
 
+class RemoteOutcomeUnknown(SpugError):
+    """The remote command may have run, but its final result was not observed."""
+
+
 class Helper:
     def __init__(self, rds, key):
         self.rds = rds
@@ -298,7 +302,16 @@ class Helper:
             if code != 0:
                 self.send_error(key, f'exit code: {code}')
         except (SSHException, socket.error, socket.timeout, EOFError, OSError) as e:
-            self.send_error(key, f'SSH连接丢失: {e}，请通过「失败重发」重新发布该主机')
+            message = (
+                f'SSH连接丢失: {e}。远端命令可能已经执行，'
+                '发布结果未知，请先人工核验目标服务，禁止直接重试。'
+            )
+            self._send({
+                'key': key,
+                'status': 'unknown',
+                'data': f'\r\n\033[31m{message}\033[0m',
+            })
+            raise RemoteOutcomeUnknown(message) from e
 
     def remote_raw(self, key, ssh, command):
         try:
@@ -306,4 +319,13 @@ class Helper:
             if code != 0:
                 self.send_error(key, f'exit code: {code}, {out}')
         except (SSHException, socket.error, socket.timeout, EOFError, OSError) as e:
-            self.send_error(key, f'SSH连接丢失: {e}，请通过「失败重发」重新发布该主机')
+            message = (
+                f'SSH连接丢失: {e}。远端命令可能已经执行，'
+                '发布结果未知，请先人工核验目标服务，禁止直接重试。'
+            )
+            self._send({
+                'key': key,
+                'status': 'unknown',
+                'data': f'\r\n\033[31m{message}\033[0m',
+            })
+            raise RemoteOutcomeUnknown(message) from e

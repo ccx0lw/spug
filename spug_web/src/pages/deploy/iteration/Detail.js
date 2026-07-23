@@ -188,6 +188,7 @@ function Detail() {
       '1': 'warning',
       '2': 'success',
       '-1': 'default',
+      '-2': 'warning',
       '-3': 'error'
     };
     return colors[status] || 'default';
@@ -198,6 +199,7 @@ function Detail() {
     '1': '发布中',
     '2': '发布成功',
     '-1': '部分失败',
+    '-2': '结果未知',
     '-3': '发布失败'
   };
 

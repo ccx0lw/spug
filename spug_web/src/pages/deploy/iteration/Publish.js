@@ -289,6 +289,7 @@ function Publish() {
       case '1': return <LoadingOutlined style={{ color: '#faad14' }} spin />;
       case '2': return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
       case '3': return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
+      case '4': return <ExclamationCircleOutlined style={{ color: '#faad14' }} />;
       default: return <ClockCircleOutlined style={{ color: '#d9d9d9' }} />;
     }
   };
@@ -299,6 +300,7 @@ function Publish() {
       '1': 'warning',
       '2': 'success',
       '3': 'error',
+      '4': 'warning',
     };
     return <Tag color={colors[status] || 'default'}>{statusAlias || status}</Tag>;
   };

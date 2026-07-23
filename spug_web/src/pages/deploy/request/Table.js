@@ -137,6 +137,12 @@ function ComTable() {
         return <Tag color="green">{info['status_alias']}</Tag>
       } else if (info.status === '-3') {
         return <Tag color="red">{info['status_alias']}</Tag>
+      } else if (info.status === '-2') {
+        return (
+          <Tooltip title="远端命令可能已经执行，请核验目标服务后确认最终结果">
+            <Tag color="gold">{info['status_alias']}</Tag>
+          </Tooltip>
+        )
       } else {
         return <Tag color="blue">{info['status_alias']}</Tag>
       }
@@ -153,6 +159,23 @@ function ComTable() {
         >日志</Action.Button>
       );
       switch (info.status) {
+        case '-2':
+          return <Action>
+            <Action.Button auth="deploy.request.do" onClick={() => store.readConsole(info)}>查看</Action.Button>
+            <Popconfirm
+              title="确认目标服务当前已是本次发布的预期版本？"
+              okText="确认成功"
+              onConfirm={() => handleUnknownOutcome(info, 'success')}>
+              <Action.Button auth="deploy.request.do">确认成功</Action.Button>
+            </Popconfirm>
+            <Popconfirm
+              title="确认远端发布未成功，并已排除仍在执行的命令？确认后才允许按失败规则重试。"
+              okText="确认失败"
+              onConfirm={() => handleUnknownOutcome(info, 'failure')}>
+              <Action.Button auth="deploy.request.do">确认失败</Action.Button>
+            </Popconfirm>
+            {logButton}
+          </Action>;
         case '-3':
           return <Action>
             <Action.Button auth="deploy.request.do" onClick={() => store.readConsole(info)}>查看</Action.Button>
@@ -237,6 +260,14 @@ function ComTable() {
     })
   }
 
+  function handleUnknownOutcome(info, outcome) {
+    return http.put(`/api/deploy/request/${info.id}/`, {outcome})
+      .then(() => {
+        message.success(outcome === 'success' ? '已确认发布成功' : '已确认发布失败')
+        store.fetchRecords()
+      })
+  }
+
   function handleDeploy(e, info, mode) {
     info.mode = mode
     store.showConsole(info);
@@ -270,6 +301,7 @@ function ComTable() {
             <Radio.Button value="0">待审核({store.counter['0'] || 0})</Radio.Button>
             <Radio.Button value="1">待发布({store.counter['1'] || 0})</Radio.Button>
             <Radio.Button value="3">发布成功({store.counter['3'] || 0})</Radio.Button>
+            <Radio.Button value="-2">结果未知({store.counter['-2'] || 0})</Radio.Button>
             <Radio.Button value="-3">发布异常({store.counter['-3'] || 0})</Radio.Button>
             <Radio.Button value="99">其他({store.counter['99'] || 0})</Radio.Button>
           </Radio.Group>

@@ -29,6 +29,7 @@ from apps.deploy.utils import (
     get_iteration_scope_error,
     get_deploy_execution_scope_error,
     get_reused_artifact_error,
+    resolve_unknown_deploy_request,
     get_cross_iteration_warnings,
     get_deploy_retry_error,
     get_deploy_retry_info,
@@ -331,7 +332,10 @@ class RequestDetailView(View):
         # 如果 env.conc_num <= 0，则不限制最大并发发布数量
         if env.conc_num > 0:
             # 获取当前环境正在发布的数量
-            current_env_count = DeployRequest.objects.filter(deploy__env=env, status='2').count()
+            current_env_count = DeployRequest.objects.filter(
+                deploy__env=env,
+                status__in=('2', '-2'),
+            ).count()
 
             # 判断是否超过最大并发发布数量
             if current_env_count >= env.conc_num:
@@ -419,6 +423,48 @@ class RequestDetailView(View):
             )
             Thread(target=Helper.send_deploy_notify, args=(req, 'approve_rst')).start()
         return json_response(error=error)
+
+    @auth('deploy.request.do')
+    @transaction.atomic
+    def put(self, request, r_id):
+        form, error = JsonParser(
+            Argument(
+                'outcome',
+                filter=lambda value: value in ('success', 'failure'),
+                help='核验结果错误',
+            ),
+        ).parse(request.body)
+        if error:
+            return json_response(error=error)
+
+        query = {'pk': r_id, 'status': '-2'}
+        if not request.user.is_supper:
+            perms = request.user.deploy_perms
+            query['deploy__app_id__in'] = perms['apps']
+            query['deploy__env_id__in'] = perms['envs']
+        req = DeployRequest.objects.select_for_update().filter(
+            **query
+        ).first()
+        if not req:
+            return json_response(error='未找到结果未知的发布申请或无操作权限')
+
+        resolve_unknown_deploy_request(req, form.outcome)
+        action = (
+            '人工核验结果未知申请：确认发布成功'
+            if form.outcome == 'success'
+            else '人工核验结果未知申请：确认发布失败'
+        )
+        record_deploy_operation(
+            'request',
+            req.id,
+            req.name,
+            action,
+            request.user,
+        )
+        return json_response({
+            'status': req.status,
+            'status_alias': req.get_status_display(),
+        })
     
 @auth('deploy.request.add|deploy.request.edit')
 def post_request_ext1(request):
@@ -1156,7 +1202,14 @@ class IterationView(View):
                 
                 # 只有待发布状态才能编辑
                 if iteration.status != '0':
-                    status_map = {'0': '待发布', '1': '发布中', '2': '发布成功', '-1': '部分失败', '-3': '发布失败'}
+                    status_map = {
+                        '0': '待发布',
+                        '1': '发布中',
+                        '2': '发布成功',
+                        '-1': '部分失败',
+                        '-2': '结果未知',
+                        '-3': '发布失败',
+                    }
                     return json_response(error=f'当前状态为"{status_map.get(iteration.status, iteration.status)}"，只有待发布状态才能编辑')
                 
                 iteration.name = form.name
@@ -1245,7 +1298,14 @@ class IterationView(View):
                 
                 # 只有待发布状态才能删除
                 if iteration.status != '0':
-                    status_map = {'0': '待发布', '1': '发布中', '2': '发布成功', '-1': '已取消', '-3': '发布异常'}
+                    status_map = {
+                        '0': '待发布',
+                        '1': '发布中',
+                        '2': '发布成功',
+                        '-1': '已取消',
+                        '-2': '结果未知',
+                        '-3': '发布异常',
+                    }
                     return json_response(error=f'当前状态为"{status_map.get(iteration.status, iteration.status)}"，只有待发布状态才能删除')
                 
                 iteration_id, iteration_name = iteration.id, iteration.name
@@ -1342,7 +1402,10 @@ class IterationPublishView(View):
                 
                 # 计算可用并发槽位
                 if env and env.conc_num > 0:
-                    current_env_count = DeployRequest.objects.filter(deploy__env_id=form.env_id, status='2').count()
+                    current_env_count = DeployRequest.objects.filter(
+                        deploy__env_id=form.env_id,
+                        status__in=('2', '-2'),
+                    ).count()
                     available_slots = max(0, env.conc_num - current_env_count)
                     if available_slots == 0:
                         return json_response(error=f'{env.name}环境 最大同时发布数量为{env.conc_num}，当前已满，请等待前面的发布完成')
@@ -1358,7 +1421,7 @@ class IterationPublishView(View):
                     try:
                         if detail.request_id:
                             existing_req = DeployRequest.objects.filter(pk=detail.request_id).first()
-                            if existing_req and existing_req.status in ['-1', '0', '1', '2']:  # 待审核、待发布、发布中
+                            if existing_req and existing_req.status in ['-2', '-1', '0', '1', '2']:
                                 continue
                     except AttributeError:
                         pass
@@ -1754,10 +1817,10 @@ class IterationPublishView(View):
                     return json_response(error='迭代明细与发布申请的应用环境不一致')
                 
                 # 检查发布申请状态，只有失败状态才能重试
-                if deploy_request.status not in ['-3', '-2', '0']:  # 失败、异常、审核驳回
+                if deploy_request.status not in ['-3', '0']:
                     status_map = {
                         '-3': '发布失败',
-                        '-2': '发布异常', 
+                        '-2': '结果未知',
                         '-1': '待审核',
                         '0': '审核驳回',
                         '1': '待发布',
@@ -1765,7 +1828,7 @@ class IterationPublishView(View):
                         '3': '发布成功'
                     }
                     return json_response(error=f'当前状态为"{status_map.get(deploy_request.status, deploy_request.status)}"，不能重试')
-                if deploy_request.status in ('-3', '-2'):
+                if deploy_request.status == '-3':
                     retry_error = get_deploy_retry_error(deploy_request)
                     if retry_error:
                         return json_response(error=retry_error)
@@ -1776,7 +1839,10 @@ class IterationPublishView(View):
                 # 检查环境并发限制
                 retry_env = deploy.env
                 if retry_env and retry_env.conc_num > 0:
-                    current_env_count = DeployRequest.objects.filter(deploy__env_id=retry_env.id, status='2').count()
+                    current_env_count = DeployRequest.objects.filter(
+                        deploy__env_id=retry_env.id,
+                        status__in=('2', '-2'),
+                    ).count()
                     if current_env_count >= retry_env.conc_num:
                         return json_response(error=f'{retry_env.name}环境 最大同时发布数量为{retry_env.conc_num}，当前已满，请等待前面的发布完成')
                 

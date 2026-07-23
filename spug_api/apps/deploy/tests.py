@@ -2,8 +2,9 @@ import json
 import os
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from datetime import datetime, timedelta
+from paramiko.ssh_exception import SSHException
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
@@ -38,6 +39,7 @@ from apps.repository.models import Repository
 from apps.app.views import get_info as get_deploy_info
 from apps.app.views import get_versions as get_deploy_versions
 from apps.deploy.utils import (
+    _cleanup_stale_requests,
     dispatch_iteration_request,
     get_cross_iteration_warnings,
     get_iteration_detail_remove_error,
@@ -48,6 +50,7 @@ from apps.deploy.utils import (
     lock_deploy_and_get_running_request,
     reconcile_iteration_detail_statuses,
 )
+from apps.deploy.helper import Helper, RemoteOutcomeUnknown
 
 
 class DeployUploadSecurityTests(TestCase):
@@ -725,10 +728,15 @@ class IterationDetailStatusTests(SimpleTestCase):
         self.assertIs(running_request, locked_request)
         deploy_select_for_update.assert_called_once_with()
         request_select_for_update.assert_called_once_with()
+        request_select_for_update.return_value.filter.assert_called_once_with(
+            deploy_id=5,
+            status__in=('2', '-2'),
+        )
 
     def test_request_status_mapping(self):
         self.assertEqual('2', get_iteration_detail_status('3'))
         self.assertEqual('3', get_iteration_detail_status('-3'))
+        self.assertEqual('4', get_iteration_detail_status('-2'))
         self.assertEqual('1', get_iteration_detail_status('2'))
         self.assertEqual('1', get_iteration_detail_status('1'))
         self.assertEqual('0', get_iteration_detail_status('0'))
@@ -756,6 +764,7 @@ class IterationDetailStatusTests(SimpleTestCase):
         self.assertEqual('2', get_iteration_overall_status(['2', '2']))
         self.assertEqual('-1', get_iteration_overall_status(['2', '3']))
         self.assertEqual('-3', get_iteration_overall_status(['3']))
+        self.assertEqual('-2', get_iteration_overall_status(['2', '4']))
 
     def test_only_untouched_pending_detail_can_be_removed(self):
         removable = SimpleNamespace(
@@ -801,6 +810,21 @@ class IterationDetailStatusTests(SimpleTestCase):
         self.assertFalse(disabled['retry_allowed'])
         self.assertIn('已禁止', disabled['retry_error'])
 
+    def test_unknown_deploy_result_is_never_directly_retryable(self):
+        env = SimpleNamespace(name='测试环境', deploy_retry_hours=24)
+        request = SimpleNamespace(
+            status='-2',
+            failed_at='2026-07-23 10:00:00',
+            do_at='2026-07-23 09:00:00',
+            created_at='2026-07-23 08:00:00',
+            deploy=SimpleNamespace(env=env),
+        )
+
+        retry_info = get_deploy_retry_info(request)
+
+        self.assertFalse(retry_info['retry_allowed'])
+        self.assertIn('禁止直接重试', retry_info['retry_error'])
+
     def test_historical_failure_without_failed_at_falls_back_to_do_at(self):
         env = SimpleNamespace(name='历史环境', deploy_retry_hours=24)
         request = SimpleNamespace(
@@ -818,6 +842,23 @@ class IterationDetailStatusTests(SimpleTestCase):
 
         self.assertTrue(retry_info['retry_allowed'])
         self.assertEqual('2026-07-17 10:00:00', retry_info['retry_deadline'])
+
+
+class RemoteOutcomeUnknownTests(SimpleTestCase):
+    def test_ssh_disconnect_is_reported_as_unknown_not_retryable_failure(self):
+        redis = Mock()
+        helper = Helper(redis, 'deploy-log')
+        ssh = Mock()
+        ssh.exec_command_with_stream.side_effect = SSHException(
+            'connection lost'
+        )
+
+        with self.assertRaises(RemoteOutcomeUnknown):
+            helper.remote('host-1', ssh, 'kubectl apply -f app.yaml')
+
+        message = json.loads(redis.rpush.call_args.args[1])
+        self.assertEqual('unknown', message['status'])
+        self.assertIn('禁止直接重试', message['data'])
 
 
 class DeployRequestObjectScopeTests(TestCase):
@@ -1096,6 +1137,55 @@ class DeployRequestObjectScopeTests(TestCase):
         error = get_reused_artifact_error(request_obj)
 
         self.assertIn('来源信息不一致', error)
+
+    def test_operator_can_resolve_unknown_request_as_success(self):
+        request_obj = self.make_request(self.allowed_deploy, status='-2')
+        request_obj.failed_at = '2026-07-23 10:00:00'
+        request_obj.save(update_fields=('failed_at',))
+        request = self.factory.put(
+            f'/api/deploy/request/{request_obj.id}/',
+            data=json.dumps({'outcome': 'success'}),
+            content_type='application/json',
+        )
+        request.user = self.creator
+
+        result = self.decode(
+            RequestDetailView.as_view()(request, r_id=request_obj.id)
+        )
+
+        self.assertFalse(result['error'])
+        request_obj.refresh_from_db()
+        self.assertEqual('3', request_obj.status)
+        self.assertIsNone(request_obj.failed_at)
+        self.assertTrue(DeployOperationLog.objects.filter(
+            target_type='request',
+            target_id=request_obj.id,
+            action='人工核验结果未知申请：确认发布成功',
+        ).exists())
+
+    def test_confirming_unknown_as_failure_restores_timed_retry_policy(self):
+        request_obj = self.make_request(self.allowed_deploy, status='-2')
+        unknown_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        request_obj.failed_at = unknown_at
+        request_obj.save(update_fields=('failed_at',))
+        request = self.factory.put(
+            f'/api/deploy/request/{request_obj.id}/',
+            data=json.dumps({'outcome': 'failure'}),
+            content_type='application/json',
+        )
+        request.user = self.creator
+
+        result = self.decode(
+            RequestDetailView.as_view()(request, r_id=request_obj.id)
+        )
+
+        self.assertFalse(result['error'])
+        request_obj.refresh_from_db()
+        self.assertEqual('-3', request_obj.status)
+        self.assertEqual(unknown_at, request_obj.failed_at)
+        self.assertTrue(get_deploy_retry_info(
+            request_obj
+        )['retry_allowed'])
 
 
 class DeployIterationObjectScopeTests(TestCase):
@@ -1388,3 +1478,31 @@ class DeployIterationObjectScopeTests(TestCase):
         self.detail.refresh_from_db()
         self.assertEqual('-3', deploy_request.status)
         self.assertEqual('3', self.detail.status)
+
+    def test_stale_running_request_becomes_unknown_and_blocks_replay(self):
+        deploy_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='迭代：长时间发布',
+            type='1',
+            extra=json.dumps(['tag', 'v1.0.0']),
+            host_ids=self.deploy.host_ids,
+            status='2',
+            do_at='2020-01-01 00:00:00',
+            created_by=self.creator,
+            do_by=self.creator,
+        )
+        self.detail.status = '1'
+        self.detail.request_id = deploy_request.id
+        self.detail.save()
+
+        cleaned = _cleanup_stale_requests(self.env.id)
+
+        deploy_request.refresh_from_db()
+        self.detail.refresh_from_db()
+        self.iteration.refresh_from_db()
+        self.assertEqual(1, cleaned)
+        self.assertEqual('-2', deploy_request.status)
+        self.assertEqual('4', self.detail.status)
+        self.assertEqual('-2', self.iteration.status)
+        _, unresolved = lock_deploy_and_get_running_request(self.deploy.id)
+        self.assertEqual(deploy_request.id, unresolved.id)

@@ -15,6 +15,7 @@ from datetime import datetime
 class DeployRequest(models.Model, ModelMixin):
     STATUS = (
         ('-3', '发布异常'),
+        ('-2', '结果未知'),
         ('-1', '已驳回'),
         ('0', '待审核'),
         ('1', '待发布'),
@@ -113,6 +114,7 @@ class DeployIteration(models.Model, ModelMixin):
         ('1', '发布中'),
         ('2', '发布成功'),
         ('-1', '部分失败'),
+        ('-2', '结果未知'),
         ('-3', '发布失败'),
     )
     name = models.CharField(max_length=100)
@@ -148,6 +150,7 @@ class DeployIterationDetail(models.Model, ModelMixin):
         ('1', '发布中'),
         ('2', '发布成功'),
         ('3', '发布失败'),
+        ('4', '结果未知'),
     )
     IMAGE_STATUS_CHOICES = (
         ('0', '未上传'),

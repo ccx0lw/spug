@@ -14,7 +14,7 @@ from apps.config.models import ContainerRepository, FileTemplate
 from apps.repository.models import Repository
 from apps.repository.utils import dispatch as build_repository
 from apps.deploy.models import DeployRequest
-from apps.deploy.helper import Helper, SpugError
+from apps.deploy.helper import Helper, RemoteOutcomeUnknown, SpugError
 from apps.docker_image.models import DockerImage
 from apps.deploy.uploads import normalize_upload_name, resolve_upload_path
 from apps.docker_image.utils import dispatch as build_docker_image
@@ -136,13 +136,16 @@ def lock_deploy_and_get_running_request(deploy_id):
     # 使用锁定读获取最新已提交状态，避免 MySQL 事务快照读取到旧数据。
     running_request = DeployRequest.objects.select_for_update().filter(
         deploy_id=deploy_id,
-        status='2',
+        status__in=('2', '-2'),
     ).only('id').first()
     return deploy, running_request
 
 
 def get_running_deploy_error(deploy):
-    return f'应用【{deploy.app.name}】在【{deploy.env.name}】环境正在发布，请等待当前发布完成'
+    return (
+        f'应用【{deploy.app.name}】在【{deploy.env.name}】环境存在发布中'
+        '或结果未知的申请，请先完成当前申请的核验处理'
+    )
 
 
 def get_deploy_retry_info(req, now=None):
@@ -157,7 +160,10 @@ def get_deploy_retry_info(req, now=None):
         'retry_error': '',
     }
 
-    if req.status not in ('-3', '-2'):
+    if req.status == '-2':
+        info['retry_error'] = '发布结果未知，禁止直接重试，请先人工核验并确认结果'
+        return info
+    if req.status != '-3':
         info['retry_error'] = '当前发布申请不是失败状态，不能重试'
         return info
     if retry_hours <= 0:
@@ -233,7 +239,7 @@ def get_cross_iteration_warnings(iteration, details):
     # 未完成的其他迭代始终展示；历史记录只展示最近一次成功发布，避免信息过载。
     related_details = list(DeployIterationDetail.objects.filter(
         deploy_id__in=deploy_ids,
-        status__in=('0', '1'),
+        status__in=('0', '1', '4'),
     ).exclude(
         iteration_id=iteration.id
     ).select_related('iteration').order_by('-iteration_id', 'sequence'))
@@ -252,7 +258,7 @@ def get_cross_iteration_warnings(iteration, details):
         )
         failed_requests = DeployRequest.objects.filter(
             deploy_id__in=deploy_ids,
-            status__in=('-3', '-2'),
+            status='-3',
         ).filter(
             Q(failed_at__gte=retry_threshold) | Q(do_at__gte=retry_threshold)
         ).select_related('deploy__env')
@@ -282,7 +288,7 @@ def get_cross_iteration_warnings(iteration, details):
         req = related_requests.get(detail.request_id)
         effective_status = get_iteration_detail_status(req.status) if req else detail.status
         retry_info = retryable_requests.get(detail.request_id)
-        if effective_status not in ('0', '1') and not (
+        if effective_status not in ('0', '1', '4') and not (
             effective_status == '3' and retry_info
         ):
             continue
@@ -368,10 +374,25 @@ def get_cross_iteration_warnings(iteration, details):
         publishing_iterations = [
             item for item in related_iterations if item['detail_status'] == '1'
         ]
+        unknown_iterations = [
+            item for item in related_iterations if item['detail_status'] == '4'
+        ]
         retryable_iterations = [
             item for item in related_iterations if item['request_retry_allowed']
         ]
-        if publishing_iterations:
+        if unknown_iterations:
+            level = 'danger'
+            kind = 'unknown_iteration'
+            label = '其他迭代结果未知'
+            names = '、'.join(
+                f'【{item["iteration_name"]}】{item["version"]}'
+                for item in unknown_iterations[:3]
+            )
+            messages.insert(
+                0,
+                f'其他迭代发布同一服务的结果尚未核验：{names}',
+            )
+        elif publishing_iterations:
             level = 'danger'
             kind = 'active_iteration'
             label = '其他迭代发布中'
@@ -460,20 +481,34 @@ def dispatch(req, fail_mode=False):
         else:
             _ext2_deploy(req, helper, env)
         req.status = '3'
+    except RemoteOutcomeUnknown:
+        req.status = '-2'
+        raise
     except Exception as e:
         req.status = '-3'
         raise e
     finally:
         close_old_connections()
-        failed_at = human_datetime() if req.status == '-3' else None
+        failed_at = human_datetime() if req.status in ('-3', '-2') else None
         req.failed_at = failed_at
-        DeployRequest.objects.filter(pk=req.id).update(
+        updated = DeployRequest.objects.filter(
+            pk=req.id,
+            status__in=('2', '-2'),
+        ).update(
             status=req.status,
             repository=req.repository,
             docker_image=req.docker_image,
             fail_host_ids=json.dumps(req.fail_host_ids),
             failed_at=failed_at,
         )
+        if not updated:
+            current = DeployRequest.objects.filter(pk=req.id).only(
+                'status',
+                'failed_at',
+            ).first()
+            if current:
+                req.status = current.status
+                req.failed_at = current.failed_at
         # 需求2: 发布完成后同步更新迭代明细状态
         _update_iteration_detail_status(req)
         # 发布完成后调度同迭代同环境下排队等待的发布任务
@@ -547,13 +582,33 @@ def get_iteration_detail_status(request_status):
     """将发布申请状态转换为迭代明细状态。"""
     if request_status == '3':
         return '2'
-    if request_status in ('-3', '-2'):
+    if request_status == '-3':
         return '3'
+    if request_status == '-2':
+        return '4'
     if request_status in ('1', '2'):
         return '1'
     if request_status in ('-1', '0'):
         return '0'
     return None
+
+
+def resolve_unknown_deploy_request(req, outcome):
+    """Persist an operator-verified result for an uncertain remote execution."""
+    if req.status != '-2':
+        raise ValueError('当前发布申请不是结果未知状态')
+    if outcome == 'success':
+        req.status = '3'
+        req.failed_at = None
+    elif outcome == 'failure':
+        req.status = '-3'
+        req.failed_at = req.failed_at or human_datetime()
+    else:
+        raise ValueError('核验结果错误')
+    req.save(update_fields=('status', 'failed_at'))
+    _update_iteration_detail_status(req)
+    transaction.on_commit(lambda: _dispatch_pending_iteration_requests(req))
+    return req
 
 
 def reconcile_iteration_detail_statuses(details):
@@ -599,9 +654,12 @@ def get_iteration_overall_status(detail_statuses):
     failed_count = detail_statuses.count('3')
     publishing_count = detail_statuses.count('1')
     pending_count = detail_statuses.count('0')
+    unknown_count = detail_statuses.count('4')
 
     if success_count == total_count:
         return '2'
+    if unknown_count > 0:
+        return '-2'
     if failed_count > 0 and pending_count == 0 and publishing_count == 0:
         return '-1' if success_count > 0 else '-3'
     if publishing_count > 0:
@@ -686,9 +744,9 @@ def _cleanup_stale_requests(env_id, stale_minutes=60):
         logger.warning(
             f'检测到僵死的发布申请: id={stale_req.id}, '
             f'app={stale_req.deploy.app.name}, do_at={stale_req.do_at}, '
-            f'已超过{stale_minutes}分钟，标记为失败'
+        f'已超过{stale_minutes}分钟，标记为结果未知'
         )
-        stale_req.status = '-3'
+        stale_req.status = '-2'
         stale_req.failed_at = human_datetime()
         stale_req.save()
         # 同步更新迭代明细状态
@@ -718,7 +776,10 @@ def _try_dispatch_queued_requests(iteration, env_id):
     _cleanup_stale_requests(env_id)
 
     # 计算当前环境可用槽位
-    current_count = DeployRequest.objects.filter(deploy__env_id=env_id, status='2').count()
+    current_count = DeployRequest.objects.filter(
+        deploy__env_id=env_id,
+        status__in=('2', '-2'),
+    ).count()
     available_slots = env.conc_num - current_count
     if available_slots <= 0:
         return
@@ -797,7 +858,7 @@ def _recover_on_startup():
         close_old_connections()
         logger.info('开始执行迭代发布启动恢复...')
 
-        # 第一步：将所有迭代相关的 status='2'(发布中) 的申请标记为失败
+        # 第一步：服务重启后无法证明远端是否已执行，标记为结果未知。
         # 服务重启后，这些请求的发布线程已经死亡，无法继续执行
         stuck_requests = DeployRequest.objects.filter(
             status='2',
@@ -807,22 +868,22 @@ def _recover_on_startup():
         affected_iteration_ids = set()
         for req in stuck_requests:
             logger.warning(
-                f'启动恢复: 标记被中断的发布申请为失败 id={req.id}, '
+                f'启动恢复: 标记被中断的发布申请为结果未知 id={req.id}, '
                 f'app={req.deploy.app.name}, env={req.deploy.env.name}'
             )
-            req.status = '-3'
+            req.status = '-2'
             req.failed_at = human_datetime()
             req.save()
             # 同步更新迭代明细状态
             details = DeployIterationDetail.objects.filter(request_id=req.id)
             for detail in details:
-                detail.status = '3'  # 发布失败
+                detail.status = '4'  # 结果未知
                 detail.save()
                 affected_iteration_ids.add(detail.iteration_id)
             stuck_count += 1
 
         if stuck_count:
-            logger.info(f'启动恢复: 已标记 {stuck_count} 个被中断的发布申请为失败')
+            logger.info(f'启动恢复: 已标记 {stuck_count} 个被中断的发布申请为结果未知')
 
         # 更新受影响的迭代整体状态
         for iteration_id in affected_iteration_ids:
