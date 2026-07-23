@@ -21,7 +21,8 @@ import {
   EditOutlined,
   DeleteOutlined,
   InfoCircleOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  SwapRightOutlined
 } from '@ant-design/icons';
 import { AuthButton } from 'components';
 import { http } from 'libs';
@@ -105,32 +106,87 @@ function Publish() {
     );
   };
 
-  const renderPublishWarnings = (warningDetails) => (
-    <div style={{ marginTop: 12 }}>
-      <Alert
-        type={warningDetails.some(item => item.cross_iteration_warning.level === 'danger') ? 'error' : 'warning'}
-        showIcon
-        message={`检测到 ${warningDetails.length} 个版本或跨迭代提示`}
-        description={
+  const renderPublishWarnings = (warningDetails) => {
+    const dangerCount = warningDetails.filter(
+      item => item.cross_iteration_warning.level === 'danger'
+    ).length;
+    return (
+      <div className={S.versionWarningConfirm}>
+        <div className={S.versionWarningConfirmIntro}>
+          <span className={dangerCount > 0 ? S.versionWarningConfirmDangerIcon : S.versionWarningConfirmIcon}>
+            <ExclamationCircleOutlined />
+          </span>
           <div>
-            {warningDetails.map(detail => {
-              const warning = detail.cross_iteration_warning;
-              return (
-                <div key={detail.id} className={S.versionWarningConfirmItem}>
-                  <span className={S.versionWarningConfirmApp}>{detail.app_name}</span>
-                  <Tag color={getWarningColor(warning.level)}>{warning.label}</Tag>
-                  <span className={S.versionWarningConfirmMessage}>{warning.message}</span>
-                </div>
-              );
-            })}
-            <div style={{ marginTop: 8, color: '#8c8c8c' }}>
-              该信息仅用于提示，确认后仍可继续发布或回滚。
+            <div className={S.versionWarningConfirmTitle}>
+              {warningDetails.length} 个应用需要确认
+            </div>
+            <div className={S.versionWarningConfirmSubtitle}>
+              {dangerCount > 0
+                ? `${dangerCount} 个应用存在正在发布或结果未知的其他迭代`
+                : '请核对当前运行版本、本次发布版本及相关迭代'}
             </div>
           </div>
-        }
-      />
-    </div>
-  );
+        </div>
+        <div className={S.versionWarningConfirmList}>
+          {warningDetails.map(detail => {
+            const warning = detail.cross_iteration_warning;
+            const latestSuccess = warning.latest_success;
+            const relatedIterations = warning.related_iterations || [];
+            const levelClass = warning.level === 'danger'
+              ? S.versionWarningConfirmDanger
+              : (warning.level === 'info'
+                ? S.versionWarningConfirmInfo
+                : S.versionWarningConfirmWarning);
+            return (
+              <div
+                key={detail.id}
+                className={`${S.versionWarningConfirmItem} ${levelClass}`}>
+                <div className={S.versionWarningConfirmItemHeader}>
+                  <span className={S.versionWarningConfirmApp}>{detail.app_name}</span>
+                  <Tag color={getWarningColor(warning.level)}>{warning.label}</Tag>
+                </div>
+                {latestSuccess && (
+                  <div className={S.versionWarningConfirmVersions}>
+                    <div className={S.versionWarningConfirmVersion}>
+                      <span>当前运行</span>
+                      <code>{latestSuccess.version || '-'}</code>
+                    </div>
+                    <SwapRightOutlined className={S.versionWarningConfirmArrow} />
+                    <div className={S.versionWarningConfirmVersion}>
+                      <span>本次发布</span>
+                      <code>{detail.version || '-'}</code>
+                    </div>
+                  </div>
+                )}
+                <div className={S.versionWarningConfirmMessage}>{warning.message}</div>
+                {relatedIterations.length > 0 && (
+                  <div className={S.versionWarningConfirmRelated}>
+                    <span className={S.versionWarningConfirmRelatedLabel}>相关迭代</span>
+                    {relatedIterations.slice(0, 2).map(item => (
+                      <span
+                        key={`${item.iteration_id}-${item.version}-${item.request_id || ''}`}
+                        className={S.versionWarningConfirmRelatedItem}>
+                        {item.iteration_name} · {item.version}
+                      </span>
+                    ))}
+                    {relatedIterations.length > 2 && (
+                      <span className={S.versionWarningConfirmRelatedMore}>
+                        +{relatedIterations.length - 2}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className={S.versionWarningConfirmFooter}>
+          <InfoCircleOutlined />
+          <span>以上内容仅作风险提示，确认后仍可继续发布或执行回滚。</span>
+        </div>
+      </div>
+    );
+  };
 
   const handlePublish = (envId, envName, isProd) => {
     const envStatus = publishStatus.find(item => Number(item.env_id) === Number(envId));
@@ -142,13 +198,23 @@ function Publish() {
     if (isProd || warningDetails.length > 0) {
       Modal.confirm({
         title: isProd ? '生产环境发布确认' : '版本与跨迭代提示',
-        icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+        icon: null,
+        className: S.versionWarningConfirmModal,
+        width: warningDetails.length > 0 ? 640 : 460,
+        centered: true,
         content: (
-          <div>
+          <div className={S.versionWarningConfirmContent}>
             {isProd && (
-              <div>
-                <p>您即将发布到 <Tag color="error">{envName}</Tag> (生产环境)</p>
-                <p style={{ color: '#ff4d4f' }}>请确认已完成所有测试环境的验证！</p>
+              <div className={S.productionPublishConfirm}>
+                <ExclamationCircleOutlined className={S.productionPublishConfirmIcon} />
+                <div>
+                  <div className={S.productionPublishConfirmTitle}>
+                    即将发布到 <Tag color="error">{envName}</Tag>
+                  </div>
+                  <div className={S.productionPublishConfirmText}>
+                    请确认已完成测试环境验证，并核对本次发布版本。
+                  </div>
+                </div>
               </div>
             )}
             {warningDetails.length > 0 && renderPublishWarnings(warningDetails)}
@@ -255,7 +321,10 @@ function Publish() {
     }
     Modal.confirm({
       title: '重试发布版本提示',
-      icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+      icon: null,
+      className: S.versionWarningConfirmModal,
+      width: 640,
+      centered: true,
       content: renderPublishWarnings([detail]),
       okText: '确认继续重试',
       okButtonProps: { danger: warning.level !== 'info' },
