@@ -12,18 +12,19 @@ import { http, X_TOKEN } from 'libs';
 import styles from './index.module.less';
 import store from './store';
 
-export default observer(function Console() {
+export default observer(function Console({record: recordProp, onClose}) {
   const outputs = useLocalStore(() => ({}));
   const terms = useLocalStore(() => ({}));
   const [fetching, setFetching] = useState(true);
+  const record = recordProp || store.record;
 
   useEffect(() => {
     let socket;
-    http.get(`/api/docker_image/${store.record.id}/`)
+    http.get(`/api/docker_image/${record.id}/`)
       .then(res => {
         Object.assign(outputs, res.outputs)
         if (res.status === '1') {
-          socket = _makeSocket(res.index)
+          socket = _makeSocket(res.index, res.spug_version)
         }
       })
       .finally(() => setFetching(false))
@@ -31,8 +32,7 @@ export default observer(function Console() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function _makeSocket(index = 0) {
-    const token = store.record.spug_version;
+  function _makeSocket(index = 0, token) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws/build_image/${token}/?x-token=${X_TOKEN}`);
     socket.onopen = () => socket.send(String(index));
@@ -89,14 +89,14 @@ export default observer(function Console() {
         footer={null}
         maskClosable={false}
         className={styles.console}
-        onCancel={() => store.closeConsole()}
+        onCancel={() => onClose ? onClose() : store.closeConsole()}
         title={
           <div>
             镜像编译控制台
-            {store.record.app_name ? "【"+store.record.app_name+"】" : null}
-            {store.record.version ? <Tag color='#f50'>{store.record.version}</Tag> : null}
-            {store.record.env_name ? <Tag color="#108ee9">{store.record.env_name}</Tag> : null}
-            {store.record.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
+            {record.app_name ? "【"+record.app_name+"】" : null}
+            {record.version ? <Tag color='#f50'>{record.version}</Tag> : null}
+            {record.env_name ? <Tag color="#108ee9">{record.env_name}</Tag> : null}
+            {record.env_prod ? <Tag color="#f50">生产环境</Tag> : null}
           </div>
         }>
           <Skeleton loading={fetching} active>

@@ -8,7 +8,11 @@ from apps.account.models import User
 from apps.app.models import App, Deploy
 from apps.config.models import Environment
 from apps.docker_image.models import DockerImage
-from apps.docker_image.views import DockerImageView, scoped_docker_images
+from apps.docker_image.views import (
+    DockerImageView,
+    get_detail,
+    scoped_docker_images,
+)
 
 
 class DockerImageObjectScopeTests(TestCase):
@@ -84,4 +88,24 @@ class DockerImageObjectScopeTests(TestCase):
         )
         self.assertTrue(
             scoped_docker_images(full_scope).filter(pk=self.image.id).exists()
+        )
+
+    @patch('apps.docker_image.views.get_redis_connection')
+    def test_log_detail_returns_realtime_stream_token(self, get_redis):
+        get_redis.return_value.lrange.return_value = []
+        request = self.factory.get(
+            f'/api/docker_image/{self.image.id}/',
+        )
+        request.user = self.scoped_user(
+            [self.app.id],
+            [self.env.id],
+        )
+
+        response = get_detail(request, self.image.id)
+        result = json.loads(response.content.decode('utf-8'))
+
+        self.assertFalse(result['error'])
+        self.assertEqual(
+            self.image.spug_version,
+            result['data']['spug_version'],
         )

@@ -229,7 +229,14 @@ def get_detail(request, r_id):
     outputs = {}
     outputs['local'] = {'id': 'local', 'data': '', 'title': '代码构建'}
     outputs['image'] = {'id': 'image', 'data': '', 'title': '镜像编译'}
-    response = AttrDict(data='', outputs= outputs, step=0, s_status='process', status=docker_image.status)
+    response = AttrDict(
+        data='',
+        outputs=outputs,
+        step=0,
+        s_status='process',
+        status=docker_image.status,
+        spug_version=docker_image.spug_version,
+    )
     data = rds.lrange(key, counter, counter + 9)
     while data:
         for item in data:

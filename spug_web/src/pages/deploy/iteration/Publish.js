@@ -20,10 +20,12 @@ import {
   CloudServerOutlined,
   EditOutlined,
   DeleteOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  FileTextOutlined
 } from '@ant-design/icons';
 import { AuthButton } from 'components';
 import { http } from 'libs';
+import ImageConsole from '../docker/images/Console';
 import store from './store';
 import S from './index.module.less';
 
@@ -38,6 +40,7 @@ function Publish() {
   const [versionLoading, setVersionLoading] = useState(null);  // 正在加载版本的 detail id
   const [removingDetail, setRemovingDetail] = useState(null);
   const [removingEnv, setRemovingEnv] = useState(null);
+  const [imageLogRecord, setImageLogRecord] = useState(null);
 
   // 自动刷新状态
   useEffect(() => {
@@ -171,6 +174,20 @@ function Publish() {
       .catch(err => {
         message.error(err.message || '发布失败');
       });
+  };
+
+  const showImageLog = (detail) => {
+    const envStatus = publishStatus.find(item => (
+      (item.details || []).some(envDetail => envDetail.id === detail.id)
+    ));
+    setImageLogRecord({
+      ...detail.docker_image,
+      id: detail.docker_image_id,
+      app_name: detail.app_name,
+      version: detail.version,
+      env_name: envStatus ? envStatus.env_name : '',
+      env_prod: envStatus ? envStatus.is_prod : false,
+    });
   };
 
   // 预传镜像
@@ -618,9 +635,26 @@ function Publish() {
           && !detail.docker_image_id
           && !requestId
           && iterationDetailCount > 1;
-        if (!requestId && !canRemove) return '-';
+        const canViewImageLog = Boolean(
+          detail.is_container
+          && detail.docker_image_id
+          && detail.docker_image
+        );
+        if (!requestId && !canRemove && !canViewImageLog) return '-';
         return (
           <Space size={4}>
+            {canViewImageLog && (
+              <Tooltip title="查看镜像构建和上传日志">
+                <AuthButton
+                  auth="deploy.docker_image.view"
+                  type="link"
+                  size="small"
+                  icon={<FileTextOutlined />}
+                  onClick={() => showImageLog(detail)}>
+                  镜像日志
+                </AuthButton>
+              </Tooltip>
+            )}
             {requestId && (
               <AuthButton
                 auth="deploy.request.view"
@@ -860,6 +894,12 @@ function Publish() {
         <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
           暂无发布数据
         </div>
+      )}
+      {imageLogRecord && (
+        <ImageConsole
+          record={imageLogRecord}
+          onClose={() => setImageLogRecord(null)}
+        />
       )}
     </Modal>
   );
