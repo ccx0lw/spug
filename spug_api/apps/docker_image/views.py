@@ -10,25 +10,48 @@ from apps.docker_image.models import DockerImage
 from apps.deploy.models import DeployRequest
 from apps.docker_image.utils import dispatch
 from apps.app.models import Deploy
+from apps.app.utils import scoped_deploys
+from apps.account.utils import has_host_perm
+from apps.repository.views import scoped_repositories
 from apps.repository.models import Repository
 from apps.config.models import ContainerRepository
 from threading import Thread
 import json
 
 
+def scoped_docker_images(user):
+    queryset = DockerImage.objects.all()
+    if user.is_supper:
+        return queryset
+    perms = user.deploy_perms
+    return queryset.filter(
+        deploy__app_id__in=perms['apps'],
+        deploy__env_id__in=perms['envs'],
+    )
+
+
+def has_image_build_host_scope(user, deploy):
+    if user.is_supper:
+        return True
+    if deploy.extend != '3' or not deploy.extend_obj:
+        return False
+    return has_host_perm(user, deploy.extend_obj.build_image_host_id)
+
+
 class DockerImageView(View):
     @auth('deploy.docker_image.view|deploy.request.add|deploy.request.edit')
     def get(self, request):
-        apps = request.user.deploy_perms['apps']
         deploy_id = request.GET.get('deploy_id')
-        data = DockerImage.objects.filter(app_id__in=apps).annotate(
+        data = scoped_docker_images(request.user).annotate(
             app_name=F('app__name'),
             app_rel_tags=F('app__rel_tags'),
             env_name=F('env__name'),
             env_prod=F('env__prod'),
             created_by_user=F('created_by__nickname'))
         if deploy_id:
-            deploy = Deploy.objects.get(pk=deploy_id)
+            deploy = scoped_deploys(request.user).filter(pk=deploy_id).first()
+            if not deploy:
+                return json_response(error='未找到发布配置或无操作权限')
             # 镜像只保留最后3条, 过滤掉和当前容器仓库配置不一致的
             if deploy:
                 containerRepository = ContainerRepository.objects.filter(env_id=deploy.env_id).first()
@@ -65,9 +88,13 @@ class DockerImageView(View):
                 if form.remarks == 'SPUG AUTO MAKE BY IMAGE BUILD' or form.remarks == 'SPUG AUTO MAKE':
                     form.remarks = ''
             
-            deploy = Deploy.objects.filter(pk=form.deploy_id).first()
+            deploy = scoped_deploys(request.user).filter(
+                pk=form.deploy_id
+            ).first()
             if not deploy:
-                return json_response(error='未找到指定发布配置')
+                return json_response(error='未找到发布配置或无操作权限')
+            if not has_image_build_host_scope(request.user, deploy):
+                return json_response(error='无权访问镜像构建主机')
             if form.extra[0] == 'tag':
                 if not form.extra[1]:
                     return json_response(error='请选择要发布的版本')
@@ -79,7 +106,14 @@ class DockerImageView(View):
             elif form.extra[0] == 'repository':
                 if not form.extra[1]:
                     return json_response(error='请选择要发布的版本')
-                repository = Repository.objects.get(pk=form.extra[1])
+                repository = scoped_repositories(request.user).filter(
+                    pk=form.extra[1],
+                    deploy=deploy,
+                ).first()
+                if not repository:
+                    return json_response(
+                        error='未找到构建记录或无操作权限'
+                    )
                 form.repository_id = repository.id
                 form.version = repository.version
                 form.spug_version = repository.spug_version
@@ -129,9 +163,11 @@ class DockerImageView(View):
             Argument('action', help='参数错误')
         ).parse(request.body)
         if error is None:
-            rep = DockerImage.objects.filter(pk=form.id).first()
+            rep = scoped_docker_images(request.user).filter(pk=form.id).first()
             if not rep:
                 return json_response(error='未找到指定构建记录')
+            if not has_image_build_host_scope(request.user, rep.deploy):
+                return json_response(error='无权访问镜像构建主机')
             if form.action == 'rebuild':
                 Thread(target=dispatch, args=(rep,)).start()
                 return json_response(rep.to_view())
@@ -143,7 +179,9 @@ class DockerImageView(View):
             Argument('id', type=int, help='请指定操作对象')
         ).parse(request.GET)
         if error is None:
-            docker_image = DockerImage.objects.filter(pk=form.id).first()
+            docker_image = scoped_docker_images(request.user).filter(
+                pk=form.id
+            ).first()
             if not docker_image:
                 return json_response(error='未找到指定构建记录')
             if docker_image.deployrequest_set.exists():
@@ -158,8 +196,13 @@ def get_requests(request):
         Argument('docker_image_id', type=int, help='参数错误')
     ).parse(request.GET)
     if error is None:
+        docker_image = scoped_docker_images(request.user).filter(
+            pk=form.docker_image_id
+        ).first()
+        if not docker_image:
+            return json_response(error='未找到指定构建记录或无操作权限')
         requests = []
-        for item in DeployRequest.objects.filter(docker_image_id=form.docker_image_id):
+        for item in DeployRequest.objects.filter(docker_image=docker_image):
             data = item.to_dict(selects=('id', 'name', 'created_at'))
             data['host_ids'] = json.loads(item.host_ids)
             data['status_alias'] = item.get_status_display()
@@ -169,7 +212,7 @@ def get_requests(request):
 
 @auth('deploy.docker_image.view')
 def get_detail(request, r_id):
-    docker_image = DockerImage.objects.filter(pk=r_id).first()
+    docker_image = scoped_docker_images(request.user).filter(pk=r_id).first()
     if not docker_image:
         return json_response(error='未找到指定构建记录')
     rds, counter = get_redis_connection(), 0

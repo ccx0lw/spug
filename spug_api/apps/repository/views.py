@@ -10,22 +10,35 @@ from apps.repository.models import Repository
 from apps.deploy.models import DeployRequest
 from apps.repository.utils import dispatch
 from apps.app.models import Deploy
+from apps.app.utils import scoped_deploys
 from threading import Thread
 import json
+
+
+def scoped_repositories(user):
+    queryset = Repository.objects.all()
+    if user.is_supper:
+        return queryset
+    perms = user.deploy_perms
+    return queryset.filter(
+        deploy__app_id__in=perms['apps'],
+        deploy__env_id__in=perms['envs'],
+    )
 
 
 class RepositoryView(View):
     @auth('deploy.repository.view|deploy.request.add|deploy.request.edit')
     def get(self, request):
-        apps = request.user.deploy_perms['apps']
         deploy_id = request.GET.get('deploy_id')
-        data = Repository.objects.filter(app_id__in=apps).annotate(
+        data = scoped_repositories(request.user).annotate(
             app_name=F('app__name'),
             app_rel_tags=F('app__rel_tags'),
             env_name=F('env__name'),
             env_prod=F('env__prod'),
             created_by_user=F('created_by__nickname'))
         if deploy_id:
+            if not scoped_deploys(request.user).filter(pk=deploy_id).exists():
+                return json_response(error='未找到发布配置或无操作权限')
             data = data.filter(deploy_id=deploy_id, status='5')
             return json_response([x.to_view() for x in data])
 
@@ -52,9 +65,11 @@ class RepositoryView(View):
                 if form.remarks == 'SPUG AUTO MAKE BY IMAGE BUILD' or form.remarks == 'SPUG AUTO MAKE':
                     form.remarks = ''
             
-            deploy = Deploy.objects.filter(pk=form.deploy_id).first()
+            deploy = scoped_deploys(request.user).filter(
+                pk=form.deploy_id
+            ).first()
             if not deploy:
-                return json_response(error='未找到指定发布配置')
+                return json_response(error='未找到发布配置或无操作权限')
             if form.extra[0] == 'tag':
                 if not form.extra[1]:
                     return json_response(error='请选择要发布的版本')
@@ -94,7 +109,7 @@ class RepositoryView(View):
             Argument('action', help='参数错误')
         ).parse(request.body)
         if error is None:
-            rep = Repository.objects.filter(pk=form.id).first()
+            rep = scoped_repositories(request.user).filter(pk=form.id).first()
             if not rep:
                 return json_response(error='未找到指定构建记录')
             if form.action == 'rebuild':
@@ -108,7 +123,9 @@ class RepositoryView(View):
             Argument('id', type=int, help='请指定操作对象')
         ).parse(request.GET)
         if error is None:
-            repository = Repository.objects.filter(pk=form.id).first()
+            repository = scoped_repositories(request.user).filter(
+                pk=form.id
+            ).first()
             if not repository:
                 return json_response(error='未找到指定构建记录')
             if repository.deployrequest_set.exists():
@@ -123,8 +140,13 @@ def get_requests(request):
         Argument('repository_id', type=int, help='参数错误')
     ).parse(request.GET)
     if error is None:
+        repository = scoped_repositories(request.user).filter(
+            pk=form.repository_id
+        ).first()
+        if not repository:
+            return json_response(error='未找到指定构建记录或无操作权限')
         requests = []
-        for item in DeployRequest.objects.filter(repository_id=form.repository_id):
+        for item in DeployRequest.objects.filter(repository=repository):
             data = item.to_dict(selects=('id', 'name', 'created_at'))
             data['host_ids'] = json.loads(item.host_ids)
             data['status_alias'] = item.get_status_display()
@@ -134,7 +156,7 @@ def get_requests(request):
 
 @auth('deploy.repository.view')
 def get_detail(request, r_id):
-    repository = Repository.objects.filter(pk=r_id).first()
+    repository = scoped_repositories(request.user).filter(pk=r_id).first()
     if not repository:
         return json_response(error='未找到指定构建记录')
     rds, counter = get_redis_connection(), 0
