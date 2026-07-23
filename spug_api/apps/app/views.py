@@ -6,8 +6,14 @@ from django.db.models import F
 from libs import JsonParser, Argument, json_response, auth
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2, DeployExtend3
 from apps.config.models import Config, ConfigHistory, Service
-from apps.app.utils import fetch_versions, remove_repo, scoped_deploys
+from apps.app.utils import (
+    fetch_versions,
+    has_app_env_scope,
+    remove_repo,
+    scoped_deploys,
+)
 from apps.apis.deploy import get_deploy_webhook_key
+from apps.account.utils import has_host_perm
 from apps.setting.utils import AppSetting
 import json
 import re
@@ -139,6 +145,14 @@ class DeployView(View):
             Argument('is_audit', type=bool, default=False)
         ).parse(request.body)
         if error is None:
+            if not has_app_env_scope(
+                    request.user, form.app_id, form.env_id):
+                return json_response(error='未找到发布配置或无操作权限')
+            if form.id and not scoped_deploys(request.user).filter(
+                    pk=form.id).exists():
+                return json_response(error='未找到发布配置或无操作权限')
+            if not has_host_perm(request.user, form.host_ids):
+                return json_response(error='无权访问目标主机')
             deploy = Deploy.objects.filter(app_id=form.app_id, env_id=form.env_id).first()
             if deploy and deploy.id != form.id:
                 return json_response(error='应用在该环境下已经存在发布配置')
@@ -158,6 +172,9 @@ class DeployView(View):
                 ).parse(request.body)
                 if error:
                     return json_response(error=error)
+                if not has_host_perm(
+                        request.user, extend_form.build_image_host_id):
+                    return json_response(error='无权访问镜像构建主机')
                 extend_form.dst_dir = extend_form.dst_dir.rstrip('/')
                 extend_form.filter_rule = json.dumps(extend_form.filter_rule)
                 if form.id:
@@ -231,7 +248,9 @@ class DeployView(View):
             Argument('id', type=int, help='请指定操作对象')
         ).parse(request.GET)
         if error is None:
-            deploy = Deploy.objects.get(pk=form.id)
+            deploy = scoped_deploys(request.user).filter(pk=form.id).first()
+            if not deploy:
+                return json_response(error='未找到发布配置或无操作权限')
             if deploy.deployrequest_set.exists():
                 return json_response(error='已存在关联的发布记录，请删除关联的发布记录后再尝试删除发布配置')
             for item in deploy.repository_set.all():

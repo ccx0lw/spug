@@ -9,14 +9,15 @@ import shutil
 import os
 
 
-def has_deploy_scope(user, deploy):
+def has_app_env_scope(user, app_id, env_id):
     if user.is_supper:
         return True
     perms = user.deploy_perms
-    return (
-        deploy.app_id in perms['apps']
-        and deploy.env_id in perms['envs']
-    )
+    return app_id in perms['apps'] and env_id in perms['envs']
+
+
+def has_deploy_scope(user, deploy):
+    return has_app_env_scope(user, deploy.app_id, deploy.env_id)
 
 
 def scoped_deploys(user):
