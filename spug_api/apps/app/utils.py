@@ -9,6 +9,27 @@ import shutil
 import os
 
 
+def has_deploy_scope(user, deploy):
+    if user.is_supper:
+        return True
+    perms = user.deploy_perms
+    return (
+        deploy.app_id in perms['apps']
+        and deploy.env_id in perms['envs']
+    )
+
+
+def scoped_deploys(user):
+    queryset = Deploy.objects.all()
+    if user.is_supper:
+        return queryset
+    perms = user.deploy_perms
+    return queryset.filter(
+        app_id__in=perms['apps'],
+        env_id__in=perms['envs'],
+    )
+
+
 def parse_envs(text):
     data = {}
     if text:

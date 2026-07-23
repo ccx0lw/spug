@@ -16,6 +16,7 @@ from apps.deploy.models import (
 )
 from apps.deploy.audit import format_app_environment_action, record_deploy_operation
 from apps.app.models import Deploy, DeployExtend2
+from apps.app.utils import scoped_deploys
 from apps.repository.models import Repository
 from apps.deploy.utils import (
     dispatch,
@@ -36,7 +37,8 @@ from apps.docker_image.models import DockerImage
 from collections import defaultdict
 from threading import Thread
 from datetime import datetime
-import subprocess
+from pathlib import Path
+import shutil
 import json
 import os
 
@@ -681,22 +683,35 @@ def get_request_info(request):
 
 @auth('deploy.request.add')
 def do_upload(request):
-    repos_dir = settings.REPOS_DIR
-    file = request.FILES['file']
+    file = request.FILES.get('file')
     deploy_id = request.POST.get('deploy_id')
-    if file and deploy_id:
-        dir_name = os.path.join(repos_dir, deploy_id)
-        file_name = datetime.now().strftime("%Y%m%d%H%M%S")
-        command = f'mkdir -p {dir_name} && cd {dir_name} && ls | sort  -rn | tail -n +11 | xargs rm -rf'
-        code, outputs = subprocess.getstatusoutput(command)
-        if code != 0:
-            return json_response(error=outputs)
-        with open(os.path.join(dir_name, file_name), 'wb') as f:
-            for chunk in file.chunks():
-                f.write(chunk)
-        return json_response(file_name)
-    else:
+    if not file or not deploy_id:
         return HttpResponseBadRequest()
+    try:
+        deploy_id = int(deploy_id)
+    except (TypeError, ValueError):
+        return json_response(error='发布配置参数错误')
+    deploy = scoped_deploys(request.user).filter(pk=deploy_id).first()
+    if not deploy:
+        return json_response(error='未找到发布配置或无操作权限')
+
+    repos_dir = Path(settings.REPOS_DIR).resolve()
+    dir_name = repos_dir / str(deploy.id)
+    dir_name.mkdir(parents=True, exist_ok=True)
+    if dir_name.resolve().parent != repos_dir:
+        return json_response(error='发布目录参数错误')
+
+    for path in sorted(dir_name.iterdir(), key=lambda item: item.name, reverse=True)[10:]:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(str(path))
+
+    file_name = datetime.now().strftime("%Y%m%d%H%M%S")
+    with (dir_name / file_name).open('wb') as f:
+        for chunk in file.chunks():
+            f.write(chunk)
+    return json_response(file_name)
 
 
 class IterationView(View):

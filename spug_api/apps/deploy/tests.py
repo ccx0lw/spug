@@ -1,9 +1,12 @@
 import json
+import os
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime, timedelta
 
-from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.account.models import User
 from apps.app.models import App, Deploy
@@ -18,6 +21,7 @@ from apps.deploy.views import (
     IterationDetailView,
     OperationLogView,
     RequestView,
+    do_upload,
     get_request_info,
 )
 from apps.deploy.utils import (
@@ -29,6 +33,94 @@ from apps.deploy.utils import (
     lock_deploy_and_get_running_request,
     reconcile_iteration_detail_statuses,
 )
+
+
+class DeployUploadSecurityTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.creator = User.objects.create(
+            username='upload-admin',
+            nickname='上传管理员',
+            password_hash='-',
+            access_token='',
+            last_login='',
+            last_ip='',
+            is_supper=True,
+        )
+        self.env = Environment.objects.create(
+            name='上传测试环境',
+            key='upload-test',
+            created_by=self.creator,
+        )
+        self.app = App.objects.create(
+            name='上传测试应用',
+            key='upload-test-app',
+            created_by=self.creator,
+        )
+        self.deploy = Deploy.objects.create(
+            app=self.app,
+            env=self.env,
+            host_ids='[]',
+            extend='2',
+            is_audit=False,
+            rst_notify='[]',
+            created_by=self.creator,
+        )
+
+    def make_user(self, apps, envs):
+        return SimpleNamespace(
+            is_supper=False,
+            deploy_perms={'apps': set(apps), 'envs': set(envs)},
+            has_perms=lambda codes: True,
+        )
+
+    def upload(self, user, deploy_id):
+        request = self.factory.post(
+            '/api/deploy/request/upload/',
+            data={
+                'deploy_id': deploy_id,
+                'file': SimpleUploadedFile('release.tar.gz', b'safe-content'),
+            },
+        )
+        request.user = user
+        response = do_upload(request)
+        return json.loads(response.content.decode('utf-8'))
+
+    def test_valid_scoped_deploy_upload_is_preserved(self):
+        user = self.make_user([self.app.id], [self.env.id])
+        with tempfile.TemporaryDirectory() as repos_dir:
+            with override_settings(REPOS_DIR=repos_dir):
+                result = self.upload(user, str(self.deploy.id))
+                upload_path = os.path.join(
+                    repos_dir,
+                    str(self.deploy.id),
+                    result['data'],
+                )
+
+                self.assertFalse(result['error'])
+                with open(upload_path, 'rb') as uploaded:
+                    self.assertEqual(b'safe-content', uploaded.read())
+
+    def test_shell_syntax_in_deploy_id_is_rejected(self):
+        user = self.make_user([self.app.id], [self.env.id])
+        with tempfile.TemporaryDirectory() as repos_dir:
+            with override_settings(REPOS_DIR=repos_dir):
+                result = self.upload(
+                    user,
+                    f'{self.deploy.id}; touch /tmp/spug-upload-probe',
+                )
+
+                self.assertEqual('发布配置参数错误', result['error'])
+                self.assertEqual([], os.listdir(repos_dir))
+
+    def test_numeric_deploy_outside_user_scope_is_rejected(self):
+        user = self.make_user([], [])
+        with tempfile.TemporaryDirectory() as repos_dir:
+            with override_settings(REPOS_DIR=repos_dir):
+                result = self.upload(user, str(self.deploy.id))
+
+                self.assertIn('无操作权限', result['error'])
+                self.assertEqual([], os.listdir(repos_dir))
 
 
 class CrossIterationWarningTests(TestCase):
