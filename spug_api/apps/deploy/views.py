@@ -2532,7 +2532,8 @@ class IterationDetailView(View):
                     if retry_error:
                         return json_response(error=retry_error)
                 
-                # 更新版本
+                # 更新版本，并在轻量审计日志中保留变更前后的版本号。
+                old_version = detail.version
                 detail.version = form.version
                 # 重置镜像状态（如果有）
                 if detail.image_status in ['3']:  # 只重置失败状态
@@ -2547,11 +2548,19 @@ class IterationDetailView(View):
                     'iteration',
                     iteration.id,
                     iteration.name,
-                    format_app_environment_action('修改', detail.deploy, '版本'),
+                    format_app_environment_action(
+                        '修改',
+                        detail.deploy,
+                        f'版本【{old_version or "-"}】→【{form.version}】',
+                    ),
                     request.user,
                 )
                 
-                return json_response({'message': '版本更新成功'})
+                return json_response({
+                    'message': '版本更新成功',
+                    'old_version': old_version,
+                    'new_version': form.version,
+                })
             except DeployIterationDetail.DoesNotExist:
                 return json_response(error='详情不存在')
             except Exception as e:

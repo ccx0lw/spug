@@ -666,9 +666,11 @@ class CrossIterationWarningTests(TestCase):
         self.assertEqual(self.user.id, operation_log.operator_id)
         self.assertEqual('测试用户', operation_log.operator_name)
         self.assertEqual(
-            '修改应用【订单服务】版本（环境【测试环境】）',
+            '修改应用【订单服务】版本【v1.0.0】→【v2.0.0】（环境【测试环境】）',
             operation_log.action,
         )
+        self.assertEqual('v1.0.0', response['data']['old_version'])
+        self.assertEqual('v2.0.0', response['data']['new_version'])
 
         response = self.get_operation_logs('iteration', detail.iteration_id)
         self.assertEqual('', response['error'])
