@@ -66,38 +66,126 @@
   }
 }
 
-.versionRiskMessage {
-  margin-top: 4px;
+.versionWarningCell {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.versionRiskTag {
+  max-width: 112px;
+  margin-right: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.versionWarningDetailButton {
+  height: 22px;
+  padding: 0 2px;
+  font-size: 12px;
+}
+
+.versionWarningPopover {
+  width: 380px;
+  max-width: calc(100vw - 64px);
+}
+
+.versionWarningSummary {
+  color: #262626;
+  line-height: 20px;
+}
+
+.versionWarningSection {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.versionWarningSectionTitle {
+  margin-bottom: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.versionWarningMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   color: #595959;
   font-size: 12px;
-  line-height: 18px;
-  cursor: help;
-  display: -webkit-box;
+}
+
+.versionWarningRelatedItem {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: #595959;
+  font-size: 12px;
+}
+
+.versionWarningIterationName {
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.versionInfoRow > td {
-  background: #e6f7ff !important;
+.versionWarningVersion {
+  max-width: 120px;
+  margin-right: 0;
+  overflow: hidden;
+  font-family: monospace;
+  text-overflow: ellipsis;
 }
 
-.versionWarningRow > td {
-  background: #fffbe6 !important;
+.versionWarningFooter {
+  margin-top: 10px;
+  color: #8c8c8c;
+  font-size: 12px;
 }
 
-.versionDangerRow > td {
-  background: #fff1f0 !important;
+.versionWarningConfirmItem {
+  display: grid;
+  grid-template-columns: minmax(90px, 120px) auto 1fr;
+  align-items: start;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.versionInfoRow:hover > td {
-  background: #bae7ff !important;
+.versionWarningConfirmApp {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.versionWarningRow:hover > td {
-  background: #fff1b8 !important;
+.versionWarningConfirmMessage {
+  line-height: 22px;
 }
 
-.versionDangerRow:hover > td {
-  background: #ffccc7 !important;
+.versionWarningBanner {
+  margin-bottom: 10px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.versionWarningBannerHint {
+  margin-left: 10px;
+  color: #8c8c8c;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.versionInfoRow > td:first-child {
+  box-shadow: inset 3px 0 #1890ff;
+}
+
+.versionWarningRow > td:first-child {
+  box-shadow: inset 3px 0 #faad14;
+}
+
+.versionDangerRow > td:first-child {
+  box-shadow: inset 3px 0 #ff4d4f;
 }

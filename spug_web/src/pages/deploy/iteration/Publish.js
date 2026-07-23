@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react';
-import { Modal, Card, Row, Col, Tag, Button, Table, Progress, Space, message, Badge, Tooltip, Alert, Select } from 'antd';
+import { Modal, Card, Row, Col, Tag, Button, Table, Progress, Space, message, Badge, Tooltip, Popover, Alert, Select } from 'antd';
 import {
   RocketOutlined, 
   CheckCircleOutlined, 
@@ -64,6 +64,42 @@ function Publish() {
     return colors[level] || 'default';
   };
 
+  const renderWarningPopover = (warning) => {
+    const relatedIterations = warning.related_iterations || [];
+    const latestSuccess = warning.latest_success;
+    return (
+      <div className={S.versionWarningPopover}>
+        <div className={S.versionWarningSummary}>{warning.message}</div>
+        {latestSuccess && (
+          <div className={S.versionWarningSection}>
+            <div className={S.versionWarningSectionTitle}>最近成功发布</div>
+            <div className={S.versionWarningMeta}>
+              <Tag color="success" className={S.versionWarningVersion}>{latestSuccess.version}</Tag>
+              {latestSuccess.iteration_name && <span>迭代：{latestSuccess.iteration_name}</span>}
+              {latestSuccess.do_at && <span>时间：{latestSuccess.do_at}</span>}
+            </div>
+          </div>
+        )}
+        {relatedIterations.length > 0 && (
+          <div className={S.versionWarningSection}>
+            <div className={S.versionWarningSectionTitle}>相关迭代</div>
+            {relatedIterations.map(item => (
+              <div
+                key={`${item.iteration_id}-${item.version}-${item.request_id || ''}`}
+                className={S.versionWarningRelatedItem}>
+                <span className={S.versionWarningIterationName}>{item.iteration_name}</span>
+                <Tag className={S.versionWarningVersion}>{item.version}</Tag>
+                <span>{item.detail_status_alias}</span>
+                {item.request_retry_allowed && <Tag color="warning">可重试</Tag>}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className={S.versionWarningFooter}>仅作提示，不限制继续发布或回滚。</div>
+      </div>
+    );
+  };
+
   const renderPublishWarnings = (warningDetails) => (
     <div style={{ marginTop: 12 }}>
       <Alert
@@ -75,9 +111,10 @@ function Publish() {
             {warningDetails.map(detail => {
               const warning = detail.cross_iteration_warning;
               return (
-                <div key={detail.id} style={{ marginTop: 6 }}>
-                  <Tag color={getWarningColor(warning.level)}>{detail.app_name}</Tag>
-                  <span>{warning.message}</span>
+                <div key={detail.id} className={S.versionWarningConfirmItem}>
+                  <span className={S.versionWarningConfirmApp}>{detail.app_name}</span>
+                  <Tag color={getWarningColor(warning.level)}>{warning.label}</Tag>
+                  <span className={S.versionWarningConfirmMessage}>{warning.message}</span>
                 </div>
               );
             })}
@@ -429,30 +466,30 @@ function Publish() {
     {
       title: '版本提示',
       dataIndex: 'cross_iteration_warning',
-      width: 220,
+      width: 160,
       render: (warning) => {
         if (!warning || !warning.has_warning) {
           return <span style={{ color: '#bfbfbf' }}>-</span>;
         }
-        const relatedIterations = warning.related_iterations || [];
         return (
-          <div>
-            <Tag color={getWarningColor(warning.level)}>{warning.label}</Tag>
-            <Tooltip
+          <div className={S.versionWarningCell}>
+            <Tag
+              color={getWarningColor(warning.level)}
+              className={S.versionRiskTag}>
+              {warning.label}
+            </Tag>
+            <Popover
               placement="topLeft"
-              title={
-                <div>
-                  <div>{warning.message}</div>
-                  {relatedIterations.map(item => (
-                    <div key={`${item.iteration_id}-${item.version}`} style={{ marginTop: 4 }}>
-                      迭代：{item.iteration_name}；版本：{item.version}；状态：{item.detail_status_alias}
-                    </div>
-                  ))}
-                </div>
-              }
+              trigger={['hover', 'click']}
+              content={renderWarningPopover(warning)}
             >
-              <div className={S.versionRiskMessage}>{warning.message}</div>
-            </Tooltip>
+              <Button
+                type="link"
+                size="small"
+                className={S.versionWarningDetailButton}>
+                详情
+              </Button>
+            </Popover>
           </div>
         );
       },
@@ -672,11 +709,15 @@ function Publish() {
           >
             {warningDetails.length > 0 && (
               <Alert
-                style={{ marginBottom: 12 }}
+                className={S.versionWarningBanner}
                 type={hasDangerWarning ? 'error' : (onlyInfoWarning ? 'info' : 'warning')}
                 showIcon
-                message={`${warningDetails.length} 个应用存在版本或跨迭代提示`}
-                description="提示不会限制发布，点击发布时可查看具体版本并确认是否继续。"
+                message={
+                  <span>
+                    {warningDetails.length} 个应用需要关注
+                    <span className={S.versionWarningBannerHint}>不影响发布，详情见“版本提示”列</span>
+                  </span>
+                }
               />
             )}
             <Table
