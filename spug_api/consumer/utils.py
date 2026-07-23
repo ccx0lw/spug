@@ -33,7 +33,10 @@ class BaseConsumer(WebsocketConsumer):
         x_real_ip = get_real_ip(self.scope['headers'])
         token = self.query_params.get('x-token', [''])[0]
         if token and len(token) == 32:
-            user = User.objects.filter(access_token=token).first()
+            user = User.objects.filter(
+                access_token=token,
+                deleted_by_id__isnull=True,
+            ).first()
             if user and user.token_expired >= time.time() and user.is_active:
                 if x_real_ip == user.last_ip or AppSetting.get_default('bind_ip') is False:
                     self.user = user

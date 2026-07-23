@@ -33,7 +33,10 @@ class AuthenticationMiddleware(MiddlewareMixin):
         access_token = request.headers.get('x-token') or request.GET.get('x-token')
         if access_token and len(access_token) == 32:
             x_real_ip = get_request_real_ip(request.headers)
-            user = User.objects.filter(access_token=access_token).first()
+            user = User.objects.filter(
+                access_token=access_token,
+                deleted_by_id__isnull=True,
+            ).first()
             if user and user.token_expired >= time.time() and user.is_active:
                 if x_real_ip == user.last_ip or AppSetting.get_default('bind_ip') is False:
                     request.user = user
