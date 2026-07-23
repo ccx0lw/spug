@@ -104,3 +104,20 @@ class HostSerializationSecurityTests(TestCase):
 
         self.assertNotIn('pkey', response)
         self.assertEqual('10.0.0.10', response['hostname'])
+
+
+class EnvironmentVariableSecurityTests(SimpleTestCase):
+    def test_valid_environment_key_is_exported(self):
+        ssh = SSH('127.0.0.1')
+
+        command = ssh._make_env_command({'_SPUG_RELEASE': 'v1'})
+
+        self.assertEqual("export _SPUG_RELEASE='v1'", command)
+
+    def test_shell_syntax_in_environment_key_is_rejected(self):
+        ssh = SSH('127.0.0.1')
+
+        with self.assertRaisesRegex(ValueError, '环境变量名称格式错误'):
+            ssh._make_env_command({
+                '_SPUG_X; touch /tmp/spug-config-probe': 'value'
+            })

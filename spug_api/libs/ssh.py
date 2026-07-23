@@ -13,6 +13,8 @@ import time
 import re
 import shlex
 
+ENV_KEY_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
 
 def _is_legacy_openssh(remote_version):
     match = re.search(r'-OpenSSH_(\d+)(?:\.(\d+))?', remote_version)
@@ -286,7 +288,11 @@ class SSH:
             return None
         str_envs = []
         for k, v in environment.items():
+            if not isinstance(k, str):
+                raise ValueError('环境变量名称格式错误')
             k = k.replace('-', '_')
+            if not ENV_KEY_RE.fullmatch(k):
+                raise ValueError(f'环境变量名称格式错误: {k!r}')
             if isinstance(v, str):
                 v = v.replace("'", "'\"'\"'")
             str_envs.append(f"{k}='{v}'")

@@ -10,6 +10,8 @@ from apps.config.models import *
 import json
 import re
 
+CONFIG_KEY_RE = re.compile(r'^_SPUG_[A-Za-z0-9_]+$')
+
 
 class EnvironmentView(View):
     def get(self, request):
@@ -182,9 +184,10 @@ class ConfigView(View):
             Argument('desc', required=False)
         ).parse(request.body)
         if error is None:
-            # 确保key以_SPUG_开头
-            if not form.key.startswith('_SPUG_'):
-                return json_response(error='Key必须以_SPUG_开头')
+            if not CONFIG_KEY_RE.fullmatch(form.key):
+                return json_response(
+                    error='Key必须以_SPUG_开头且只能包含字母、数字和下划线'
+                )
             
             form.value = form.value.strip()
             form.updated_at = human_datetime()
