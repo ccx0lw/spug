@@ -9,7 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.account.models import User
-from apps.app.models import App, Deploy
+from apps.app.models import App, Deploy, DeployExtend3
 from apps.config.models import Environment
 from apps.deploy.models import (
     DeployIteration,
@@ -19,6 +19,9 @@ from apps.deploy.models import (
 )
 from apps.deploy.views import (
     IterationDetailView,
+    IterationImageView,
+    IterationPublishView,
+    IterationView,
     OperationLogView,
     RequestDetailView,
     RequestView,
@@ -27,9 +30,12 @@ from apps.deploy.views import (
     post_request_ext1,
     post_request_ext1_rollback,
 )
+from apps.host.models import Group, Host
+from apps.docker_image.models import DockerImage
 from apps.app.views import get_info as get_deploy_info
 from apps.app.views import get_versions as get_deploy_versions
 from apps.deploy.utils import (
+    dispatch_iteration_request,
     get_cross_iteration_warnings,
     get_iteration_detail_remove_error,
     get_iteration_detail_status,
@@ -900,3 +906,295 @@ class DeployRequestObjectScopeTests(TestCase):
             1,
             DeployRequest.objects.filter(deploy=self.denied_deploy).count(),
         )
+
+
+class DeployIterationObjectScopeTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.creator = User.objects.create(
+            username='iteration-scope-admin',
+            nickname='迭代管理员',
+            password_hash='-',
+            access_token='',
+            last_login='',
+            last_ip='',
+            is_supper=True,
+        )
+        self.env = Environment.objects.create(
+            name='迭代授权环境',
+            key='iteration-scope-env',
+            created_by=self.creator,
+        )
+        self.other_env = Environment.objects.create(
+            name='迭代越权环境',
+            key='iteration-denied-env',
+            created_by=self.creator,
+        )
+        self.app = App.objects.create(
+            name='迭代授权应用',
+            key='iteration-scope-app',
+            created_by=self.creator,
+        )
+        self.other_app = App.objects.create(
+            name='迭代越权应用',
+            key='iteration-denied-app',
+            created_by=self.creator,
+        )
+        self.target_host = Host.objects.create(
+            name='发布目标主机',
+            hostname='10.0.0.1',
+            port=22,
+            username='root',
+            created_by=self.creator,
+        )
+        self.deploy = self.make_deploy(
+            self.app,
+            self.env,
+            [self.target_host.id],
+        )
+        self.denied_deploy = self.make_deploy(
+            self.other_app,
+            self.other_env,
+            [],
+        )
+        self.iteration = DeployIteration.objects.create(
+            name='对象范围迭代',
+            env=self.env,
+            created_by=self.creator,
+        )
+        self.detail = DeployIterationDetail.objects.create(
+            iteration=self.iteration,
+            deploy=self.deploy,
+            version='v1.0.0',
+            created_by=self.creator,
+        )
+
+    def make_deploy(self, app, env, host_ids, extend='1'):
+        return Deploy.objects.create(
+            app=app,
+            env=env,
+            host_ids=json.dumps(host_ids),
+            extend=extend,
+            is_audit=False,
+            rst_notify='[]',
+            created_by=self.creator,
+        )
+
+    def scoped_user(self, apps=None, envs=None, groups=None):
+        return SimpleNamespace(
+            id=999,
+            nickname='受限用户',
+            is_supper=False,
+            deploy_perms={
+                'apps': set(apps or []),
+                'envs': set(envs or []),
+            },
+            group_perms=list(groups or []),
+            has_perms=lambda codes: True,
+        )
+
+    def decode(self, response):
+        return json.loads(response.content.decode())
+
+    def test_iteration_read_and_create_require_all_app_environment_scope(self):
+        user = self.scoped_user()
+        read_request = self.factory.get(
+            '/api/deploy/iteration/',
+            data={'id': self.iteration.id},
+        )
+        read_request.user = user
+        create_request = self.factory.post(
+            '/api/deploy/iteration/',
+            data=json.dumps({
+                'name': '越权创建',
+                'env_ids': [self.other_env.id],
+                'details': [{
+                    'app_id': self.other_app.id,
+                    'env_id': self.other_env.id,
+                    'version': 'v2.0.0',
+                }],
+            }),
+            content_type='application/json',
+        )
+        create_request.user = user
+
+        read_result = self.decode(IterationView.as_view()(read_request))
+        create_result = self.decode(IterationView.as_view()(create_request))
+
+        self.assertEqual([], read_result['data'])
+        self.assertIn('无权访问目标环境', create_result['error'])
+        self.assertEqual(1, DeployIteration.objects.count())
+
+    @patch('apps.deploy.views.Thread')
+    def test_publish_checks_target_host_before_creating_requests(
+            self, thread):
+        user = self.scoped_user(
+            apps=[self.app.id],
+            envs=[self.env.id],
+        )
+        request = self.factory.post(
+            '/api/deploy/iteration/publish/',
+            data=json.dumps({
+                'iteration_id': self.iteration.id,
+                'env_id': self.env.id,
+            }),
+            content_type='application/json',
+        )
+        request.user = user
+
+        result = self.decode(IterationPublishView.as_view()(request))
+
+        self.assertEqual('无权访问发布目标主机', result['error'])
+        self.assertEqual(0, DeployRequest.objects.count())
+        thread.assert_not_called()
+
+    @patch('apps.deploy.views.Thread')
+    def test_retry_checks_scope_before_changing_failed_request(
+            self, thread):
+        failed_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='失败申请',
+            type='1',
+            extra=json.dumps(['tag', 'v1.0.0']),
+            host_ids=self.deploy.host_ids,
+            status='-3',
+            failed_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            created_by=self.creator,
+        )
+        self.detail.status = '3'
+        self.detail.request_id = failed_request.id
+        self.detail.save()
+        user = self.scoped_user(
+            apps=[self.app.id],
+            envs=[self.env.id],
+        )
+        request = self.factory.patch(
+            '/api/deploy/iteration/publish/',
+            data=json.dumps({'detail_id': self.detail.id}),
+            content_type='application/json',
+        )
+        request.user = user
+
+        result = self.decode(IterationPublishView.as_view()(request))
+
+        self.assertEqual('无权访问发布目标主机', result['error'])
+        failed_request.refresh_from_db()
+        self.assertEqual('-3', failed_request.status)
+        thread.assert_not_called()
+
+    @patch('apps.deploy.views.Thread')
+    def test_image_upload_checks_build_host_before_writes(self, thread):
+        deploy_group = Group.objects.create(name='发布主机分组')
+        deploy_group.hosts.add(self.target_host)
+        build_host = Host.objects.create(
+            name='镜像构建主机',
+            hostname='10.0.0.2',
+            port=22,
+            username='root',
+            created_by=self.creator,
+        )
+        container_deploy = self.make_deploy(
+            self.app,
+            self.env,
+            [self.target_host.id],
+            extend='3',
+        )
+        DeployExtend3.objects.create(
+            deploy=container_deploy,
+            git_repo='git@example/repo.git',
+            dst_dir='/tmp',
+            dst_repo='/tmp/repo',
+            versions=3,
+            filter_rule='[]',
+            build_image_host_id=build_host.id,
+            dockerfile_params='[]',
+            yaml_params='[]',
+        )
+        container_detail = DeployIterationDetail.objects.create(
+            iteration=self.iteration,
+            deploy=container_deploy,
+            version='v1.0.0',
+            created_by=self.creator,
+        )
+        user = self.scoped_user(
+            apps=[self.app.id],
+            envs=[self.env.id],
+            groups=[deploy_group.id],
+        )
+        request = self.factory.post(
+            '/api/deploy/iteration/image/',
+            data=json.dumps({
+                'iteration_id': self.iteration.id,
+                'env_id': self.env.id,
+            }),
+            content_type='application/json',
+        )
+        request.user = user
+
+        result = self.decode(IterationImageView.as_view()(request))
+
+        self.assertEqual('无权访问镜像构建主机', result['error'])
+        container_detail.refresh_from_db()
+        self.assertEqual('0', container_detail.image_status)
+        self.assertEqual(0, DockerImage.objects.count())
+        thread.assert_not_called()
+
+    def test_detail_mutations_require_iteration_scope(self):
+        user = self.scoped_user()
+        update_request = self.factory.put(
+            '/api/deploy/iteration/detail/',
+            data=json.dumps({
+                'detail_id': self.detail.id,
+                'version': 'v9.9.9',
+            }),
+            content_type='application/json',
+        )
+        update_request.user = user
+        delete_request = self.factory.delete(
+            f'/api/deploy/iteration/detail/?detail_id={self.detail.id}'
+        )
+        delete_request.user = user
+
+        updated = self.decode(
+            IterationDetailView.as_view()(update_request)
+        )
+        deleted = self.decode(
+            IterationDetailView.as_view()(delete_request)
+        )
+
+        self.assertIn('无操作权限', updated['error'])
+        self.assertIn('无操作权限', deleted['error'])
+        self.detail.refresh_from_db()
+        self.assertEqual('v1.0.0', self.detail.version)
+
+    @patch('apps.deploy.utils.dispatch')
+    def test_background_dispatch_rechecks_revoked_scope(self, dispatch):
+        actor = User.objects.create(
+            username='revoked-iteration-operator',
+            nickname='已撤权用户',
+            password_hash='-',
+            access_token='',
+            last_login='',
+            last_ip='',
+        )
+        deploy_request = DeployRequest.objects.create(
+            deploy=self.deploy,
+            name='等待后台复核',
+            type='1',
+            extra=json.dumps(['tag', 'v1.0.0']),
+            host_ids=self.deploy.host_ids,
+            status='2',
+            created_by=self.creator,
+            do_by=actor,
+        )
+        self.detail.status = '1'
+        self.detail.request_id = deploy_request.id
+        self.detail.save()
+
+        dispatch_iteration_request(deploy_request.id, actor.id)
+
+        dispatch.assert_not_called()
+        deploy_request.refresh_from_db()
+        self.detail.refresh_from_db()
+        self.assertEqual('-3', deploy_request.status)
+        self.assertEqual('3', self.detail.status)

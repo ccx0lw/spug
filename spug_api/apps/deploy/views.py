@@ -20,10 +20,13 @@ from apps.app.utils import scoped_deploys
 from apps.repository.models import Repository
 from apps.deploy.utils import (
     dispatch,
+    dispatch_iteration_request,
     Helper,
     get_iteration_detail_status,
     get_iteration_detail_remove_error,
     get_iteration_overall_status,
+    get_iteration_scope_error,
+    get_deploy_execution_scope_error,
     get_cross_iteration_warnings,
     get_deploy_retry_error,
     get_deploy_retry_info,
@@ -75,10 +78,15 @@ class OperationLogView(View):
                     deploy__env_id__in=perms['envs'],
                 ).exists()
             else:
-                target_visible = DeployIteration.objects.filter(
+                iteration = DeployIteration.objects.filter(
                     pk=form.target_id,
-                    env_id__in=perms['envs'],
-                ).exists()
+                ).first()
+                target_visible = bool(
+                    iteration and not get_iteration_scope_error(
+                        request.user,
+                        iteration,
+                    )
+                )
             if not target_visible:
                 return json_response(error='未找到日志对象或无查看权限')
 
@@ -792,6 +800,58 @@ def do_upload(request):
     return json_response(file_name)
 
 
+def _resolve_iteration_form_details(user, env_ids, detail_items):
+    try:
+        normalized_env_ids = {int(env_id) for env_id in env_ids}
+    except (TypeError, ValueError):
+        return None, '环境ID格式错误'
+    if not normalized_env_ids:
+        return None, '请选择至少一个环境'
+    if Environment.objects.filter(
+            pk__in=normalized_env_ids).count() != len(normalized_env_ids):
+        return None, '存在无效的环境'
+    if not user.is_supper:
+        allowed_env_ids = set(user.deploy_perms['envs'])
+        if not normalized_env_ids.issubset(allowed_env_ids):
+            return None, '无权访问目标环境'
+    if not detail_items:
+        return None, '请至少添加一个发布项'
+
+    normalized_items = []
+    keys = []
+    try:
+        for item in detail_items:
+            app_id = int(item.get('app_id'))
+            env_id = int(item.get('env_id'))
+            if env_id not in normalized_env_ids:
+                return None, '发布项环境不在迭代环境列表中'
+            version = item.get('version')
+            if not version:
+                return None, '发布项版本不能为空'
+            key = (app_id, env_id)
+            if key in keys:
+                return None, '迭代中存在重复的应用环境发布项'
+            keys.append(key)
+            normalized_items.append({
+                'key': key,
+                'version': version,
+                'sequence': item.get('sequence', 0),
+            })
+    except (TypeError, ValueError):
+        return None, '发布项参数错误'
+
+    deploys = scoped_deploys(user).filter(
+        app_id__in=[key[0] for key in keys],
+        env_id__in=[key[1] for key in keys],
+    ).select_related('app', 'env')
+    deploy_map = {(deploy.app_id, deploy.env_id): deploy for deploy in deploys}
+    if any(key not in deploy_map for key in keys):
+        return None, '发布项不存在或无操作权限'
+    for item in normalized_items:
+        item['deploy'] = deploy_map[item['key']]
+    return normalized_items, ''
+
+
 class IterationView(View):
     @auth('deploy.iteration.view')
     def get(self, request):
@@ -857,7 +917,14 @@ class IterationView(View):
             )
         )
 
-        items = list(qs)
+        items = [
+            item for item in qs
+            if not get_iteration_scope_error(
+                request.user,
+                item,
+                item.details.all(),
+            )
+        ]
         all_details = []
         for item in items:
             all_details.extend(item.details.all())
@@ -946,10 +1013,15 @@ class IterationView(View):
         
         if error is None:
             try:
+                resolved_details, scope_error = _resolve_iteration_form_details(
+                    request.user,
+                    form.env_ids,
+                    form.details,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 # 使用第一个环境作为迭代的主环境
-                main_env_id = form.env_ids[0] if form.env_ids else None
-                if not main_env_id:
-                    return json_response(error='请选择至少一个环境')
+                main_env_id = int(form.env_ids[0])
 
                 iteration = DeployIteration.objects.create(
                     name=form.name,
@@ -959,26 +1031,12 @@ class IterationView(View):
                     created_by=request.user
                 )
                 
-                # 添加迭代明细 - 根据 app_id 和 env_id 查询对应的 deploy_id
-                from apps.app.models import Deploy
-                for item in form.details:
-                    app_id = item.get('app_id')
-                    env_id = item.get('env_id')
-                    version = item.get('version')
-                    
-                    if not app_id or not env_id:
-                        continue
-                    
-                    # 查找该应用在该环境的部署配置
-                    deploy = Deploy.objects.filter(app_id=app_id, env_id=env_id).first()
-                    if not deploy:
-                        continue
-                    
+                for item in resolved_details:
                     DeployIterationDetail.objects.create(
                         iteration=iteration,
-                        deploy_id=deploy.id,
-                        version=version,
-                        sequence=item.get('sequence', 0),
+                        deploy=item['deploy'],
+                        version=item['version'],
+                        sequence=item['sequence'],
                         created_by=request.user
                     )
 
@@ -1024,6 +1082,19 @@ class IterationView(View):
                 iteration = DeployIteration.objects.filter(pk=form.id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
+                resolved_details, scope_error = _resolve_iteration_form_details(
+                    request.user,
+                    form.env_ids,
+                    form.details,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 
                 # 只有待发布状态才能编辑
                 if iteration.status != '0':
@@ -1033,15 +1104,10 @@ class IterationView(View):
                 iteration.name = form.name
                 # 使用第一个环境作为主环境
                 if form.env_ids:
-                    iteration.env_id = form.env_ids[0]
+                    iteration.env_id = int(form.env_ids[0])
                 iteration.desc = form.desc
-                if form.status:
-                    iteration.status = form.status
                 iteration.updated_by = request.user
                 iteration.save()
-                
-                # 更新迭代明细 - 保留已发布成功的明细，只更新待发布的
-                from apps.app.models import Deploy
                 
                 # 获取已发布成功的明细（不能删除和修改版本）- 兼容处理
                 published_details = {}
@@ -1056,33 +1122,21 @@ class IterationView(View):
                     # 字段不存在时删除所有明细
                     iteration.details.all().delete()
                 
-                for item in form.details:
-                    app_id = item.get('app_id')
-                    env_id = item.get('env_id')
-                    version = item.get('version')
-                    
-                    if not app_id or not env_id:
-                        continue
-                    
-                    # 查找该应用在该环境的部署配置
-                    deploy = Deploy.objects.filter(app_id=app_id, env_id=env_id).first()
-                    if not deploy:
-                        continue
-                    
+                for item in resolved_details:
                     # 检查是否是已发布成功的明细
-                    key = (app_id, env_id)
+                    key = item['key']
                     if key in published_details:
                         # 只更新 sequence，不修改版本
                         existing = published_details[key]
-                        existing.sequence = item.get('sequence', 0)
+                        existing.sequence = item['sequence']
                         existing.save()
                     else:
                         # 创建新的明细
                         DeployIterationDetail.objects.create(
                             iteration=iteration,
-                            deploy_id=deploy.id,
-                            version=version,
-                            sequence=item.get('sequence', 0),
+                            deploy=item['deploy'],
+                            version=item['version'],
+                            sequence=item['sequence'],
                             created_by=request.user
                         )
 
@@ -1124,6 +1178,12 @@ class IterationView(View):
                 iteration = DeployIteration.objects.filter(pk=form.id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 
                 # 只有待发布状态才能删除
                 if iteration.status != '0':
@@ -1161,6 +1221,16 @@ class IterationPublishView(View):
                 iteration = DeployIteration.objects.select_for_update().filter(pk=form.iteration_id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
+                if (
+                        not request.user.is_supper
+                        and form.env_id not in request.user.deploy_perms['envs']):
+                    return json_response(error='无权访问目标环境')
                 
                 # 获取该环境下的所有待发布项 - 兼容处理
                 try:
@@ -1176,6 +1246,21 @@ class IterationPublishView(View):
                 
                 if not details:
                     return json_response(error='该环境下没有待发布的项目')
+                for detail in details:
+                    if not detail.version:
+                        return json_response(
+                            error=(
+                                f'应用【{detail.deploy.app.name}】未设置发布版本，'
+                                '请先编辑迭代并选择版本后再发布'
+                            )
+                        )
+                for detail in details:
+                    scope_error = get_deploy_execution_scope_error(
+                        request.user,
+                        detail.deploy,
+                    )
+                    if scope_error:
+                        return json_response(error=scope_error)
 
                 # 按固定顺序锁定所有发布配置，避免不同迭代或普通发布并发穿透。
                 deploy_ids = [detail.deploy_id for detail in details]
@@ -1194,6 +1279,8 @@ class IterationPublishView(View):
                 
                 # 获取环境配置，用于设置并发数
                 env = Environment.objects.filter(pk=form.env_id).first()
+                if not env:
+                    return json_response(error='未找到目标环境')
                 
                 # 计算可用并发槽位
                 if env and env.conc_num > 0:
@@ -1221,10 +1308,6 @@ class IterationPublishView(View):
                     deploy = locked_deploys[detail.deploy_id]
                     version = detail.version
 
-                    # 校验版本不能为空（迭代创建时若加载未完成可能存储了空字符串）
-                    if not version:
-                        return json_response(error=f'应用【{deploy.app.name}】未设置发布版本，请先编辑迭代并选择版本后再发布')
-
                     # 根据发布类型构建 extra 字段和关联镜像
                     # extend: '1' 常规发布, '2' 自定义发布, '3' 容器发布
                     docker_image_id = None
@@ -1237,7 +1320,11 @@ class IterationPublishView(View):
                         # 只有镜像上传成功（status='2'）且镜像确实存在且成功（status='5'）时才使用镜像
                         use_prebuilt_image = False
                         if detail_docker_image_id and detail_image_status == '2':
-                            docker_image = DockerImage.objects.filter(pk=detail_docker_image_id, status='5').first()
+                            docker_image = DockerImage.objects.filter(
+                                pk=detail_docker_image_id,
+                                deploy_id=deploy.id,
+                                status='5',
+                            ).first()
                             if docker_image:
                                 # 有可用的预传镜像，使用镜像方式
                                 docker_image_id = docker_image.id
@@ -1317,7 +1404,12 @@ class IterationPublishView(View):
                 
                 # 使用 on_commit 确保事务提交后再启动发布线程
                 for req_obj in pending_dispatches:
-                    transaction.on_commit(lambda r=req_obj: Thread(target=dispatch, args=(r, False)).start())
+                    transaction.on_commit(
+                        lambda r=req_obj: Thread(
+                            target=dispatch_iteration_request,
+                            args=(r.id, request.user.id, False),
+                        ).start()
+                    )
                 
                 queued_count = len(created_requests) - len(pending_dispatches)
                 if queued_count > 0:
@@ -1344,6 +1436,12 @@ class IterationPublishView(View):
                 iteration = DeployIteration.objects.filter(pk=form.iteration_id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 
                 # 使用 prefetch_related 预加载所有关联数据
                 details = list(DeployIterationDetail.objects.filter(
@@ -1528,8 +1626,22 @@ class IterationPublishView(View):
                 # 查询状态时触发僵死清理和排队调度（处理进程崩溃/SSH假死等异常场景）
                 try:
                     from apps.deploy.utils import _try_dispatch_queued_requests
-                    for env_id_key in env_status:
-                        _try_dispatch_queued_requests(iteration, env_id_key)
+                    if request.user.has_perms(['deploy.iteration.do']):
+                        for env_id_key in env_status:
+                            env_details = [
+                                detail for detail in details
+                                if detail.deploy.env_id == env_id_key
+                            ]
+                            if all(
+                                    not get_deploy_execution_scope_error(
+                                        request.user,
+                                        detail.deploy,
+                                    )
+                                    for detail in env_details):
+                                _try_dispatch_queued_requests(
+                                    iteration,
+                                    env_id_key,
+                                )
                 except Exception:
                     pass
                 
@@ -1547,9 +1659,26 @@ class IterationPublishView(View):
         
         if error is None:
             try:
-                detail = DeployIterationDetail.objects.select_for_update().filter(pk=form.detail_id).first()
+                detail = DeployIterationDetail.objects.select_for_update().select_related(
+                    'iteration',
+                    'deploy',
+                    'deploy__app',
+                    'deploy__env',
+                ).filter(pk=form.detail_id).first()
                 if not detail:
                     return json_response(error='未找到指定明细')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    detail.iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
+                scope_error = get_deploy_execution_scope_error(
+                    request.user,
+                    detail.deploy,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 
                 # 检查是否有关联的发布申请
                 if not detail.request_id:
@@ -1608,7 +1737,11 @@ class IterationPublishView(View):
                     detail_image_status = getattr(detail, 'image_status', '0')
                     
                     if detail_docker_image_id and detail_image_status == '2':
-                        prebuilt_image = DockerImage.objects.filter(pk=detail_docker_image_id, status='5').first()
+                        prebuilt_image = DockerImage.objects.filter(
+                            pk=detail_docker_image_id,
+                            deploy_id=deploy.id,
+                            status='5',
+                        ).first()
                         if prebuilt_image:
                             has_prebuilt_image = True
                     
@@ -1685,7 +1818,12 @@ class IterationPublishView(View):
                         
                         # 使用 on_commit 确保事务提交后再启动发布线程
                         _new_req = new_request
-                        transaction.on_commit(lambda: Thread(target=dispatch, args=(_new_req, False)).start())
+                        transaction.on_commit(
+                            lambda req_id=_new_req.id, actor_id=request.user.id: Thread(
+                                target=dispatch_iteration_request,
+                                args=(req_id, actor_id, False),
+                            ).start()
+                        )
                         
                         return json_response({
                             'message': '已创建新的发布申请并启动发布' + ('（镜像发布）' if has_prebuilt_image else '（标签发布）'),
@@ -1724,7 +1862,12 @@ class IterationPublishView(View):
                 
                 # 使用 on_commit 确保事务提交后再启动发布线程
                 _retry_req = deploy_request
-                transaction.on_commit(lambda: Thread(target=dispatch, args=(_retry_req, False)).start())
+                transaction.on_commit(
+                    lambda req_id=_retry_req.id, actor_id=request.user.id: Thread(
+                        target=dispatch_iteration_request,
+                        args=(req_id, actor_id, False),
+                    ).start()
+                )
                 
                 return json_response({
                     'message': '已重新启动发布',
@@ -1744,6 +1887,7 @@ class IterationImageView(View):
         from apps.docker_image.models import DockerImage
         from apps.docker_image.utils import dispatch
         from apps.deploy.models import DeployIterationDetail
+        from apps.account.models import User
         import logging
         
         logger = logging.getLogger(__name__)
@@ -1753,9 +1897,14 @@ class IterationImageView(View):
                 detail_id = data['detail_id']
                 docker_image_id = data['docker_image_id']
                 app_name = data['app_name']
+                actor_id = data.get('actor_id')
                 
                 # 获取镜像记录
-                docker_image = DockerImage.objects.filter(pk=docker_image_id).first()
+                docker_image = DockerImage.objects.select_related(
+                    'deploy',
+                    'deploy__app',
+                    'deploy__env',
+                ).filter(pk=docker_image_id).first()
                 if not docker_image:
                     logger.error(f'镜像记录不存在: {docker_image_id}')
                     # 更新明细状态为失败
@@ -1766,6 +1915,28 @@ class IterationImageView(View):
                             detail.save()
                     except Exception:
                         pass
+                    continue
+                actor = User.objects.filter(
+                    pk=actor_id,
+                    is_active=True,
+                    deleted_at__isnull=True,
+                ).first()
+                if (
+                        not actor
+                        or get_deploy_execution_scope_error(
+                            actor,
+                            docker_image.deploy,
+                        )):
+                    logger.error(
+                        f'镜像构建权限已失效: {app_name} '
+                        f'(镜像ID: {docker_image_id})'
+                    )
+                    docker_image.status = '2'
+                    docker_image.save(update_fields=('status',))
+                    DeployIterationDetail.objects.filter(
+                        pk=detail_id,
+                        docker_image_id=docker_image_id,
+                    ).update(image_status='3')
                     continue
                 
                 # 检查同一 deploy 是否有其他正在构建中的镜像（排除当前镜像）
@@ -1844,15 +2015,36 @@ class IterationImageView(View):
                 iteration = DeployIteration.objects.select_for_update().filter(pk=form.iteration_id).first()
                 if not iteration:
                     return json_response(error='未找到指定迭代')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
+                if (
+                        not request.user.is_supper
+                        and form.env_id not in request.user.deploy_perms['envs']):
+                    return json_response(error='无权访问目标环境')
                 
                 # 获取该环境下所有容器发布类型的待发布项
-                details = iteration.details.select_for_update().filter(
+                details = list(iteration.details.select_for_update().filter(
                     deploy__env_id=form.env_id,
                     deploy__extend='3',  # 容器发布
-                ).order_by('sequence')
+                ).select_related(
+                    'deploy',
+                    'deploy__app',
+                    'deploy__env',
+                ).order_by('sequence'))
                 
-                if not details.exists():
+                if not details:
                     return json_response(error='该环境下没有容器发布类型的项目')
+                for detail in details:
+                    scope_error = get_deploy_execution_scope_error(
+                        request.user,
+                        detail.deploy,
+                    )
+                    if scope_error:
+                        return json_response(error=scope_error)
                 
                 created_images = []
                 skipped = []
@@ -1926,7 +2118,8 @@ class IterationImageView(View):
                         created_images.append({
                             'detail_id': detail.id,
                             'docker_image_id': docker_image.id,
-                            'app_name': app_name
+                            'app_name': app_name,
+                            'actor_id': request.user.id,
                         })
                     except Exception as e:
                         # 单个应用失败不影响其他应用
@@ -1997,6 +2190,18 @@ class IterationImageView(View):
                 ).filter(pk=form.detail_id).first()
                 if not detail:
                     return json_response(error='未找到指定明细')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    detail.iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
+                scope_error = get_deploy_execution_scope_error(
+                    request.user,
+                    detail.deploy,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 
                 deploy = detail.deploy
                 version = detail.version
@@ -2032,7 +2237,10 @@ class IterationImageView(View):
                 
                 # 如果已有镜像记录，检查状态并重新编译
                 if detail.docker_image_id:
-                    docker_image = DockerImage.objects.filter(pk=detail.docker_image_id).first()
+                    docker_image = DockerImage.objects.filter(
+                        pk=detail.docker_image_id,
+                        deploy_id=deploy.id,
+                    ).first()
                     if docker_image:
                         if docker_image.status in ['0', '1']:
                             return json_response(error='镜像正在编译中，请稍后')
@@ -2070,7 +2278,18 @@ class IterationImageView(View):
                             format_app_environment_action('重试', deploy, '镜像'),
                             request.user,
                         )
-                        Thread(target=dispatch, args=(docker_image,)).start()
+                        retry_data = [{
+                            'detail_id': detail.id,
+                            'docker_image_id': docker_image.id,
+                            'app_name': app_name,
+                            'actor_id': request.user.id,
+                        }]
+                        transaction.on_commit(
+                            lambda data=retry_data, name=iteration.name: Thread(
+                                target=self._sequential_build_images,
+                                args=(data, name),
+                            ).start()
+                        )
                         return json_response({
                             'message': '已重新启动镜像编译',
                             'docker_image_id': docker_image.id
@@ -2111,7 +2330,18 @@ class IterationImageView(View):
                     request.user,
                 )
                 
-                Thread(target=dispatch, args=(docker_image,)).start()
+                retry_data = [{
+                    'detail_id': detail.id,
+                    'docker_image_id': docker_image.id,
+                    'app_name': app_name,
+                    'actor_id': request.user.id,
+                }]
+                transaction.on_commit(
+                    lambda data=retry_data, name=iteration.name: Thread(
+                        target=self._sequential_build_images,
+                        args=(data, name),
+                    ).start()
+                )
                 
                 return json_response({'message': '已创建镜像编译任务', 'docker_image_id': docker_image.id})
             except Exception as e:
@@ -2135,6 +2365,12 @@ class IterationDetailView(View):
                     'iteration', 'deploy__app', 'deploy__env'
                 ).get(pk=form.detail_id)
                 iteration = detail.iteration
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 
                 # 检查迭代状态 - 已完全成功的迭代不允许修改
                 if iteration.status == '2':
@@ -2223,6 +2459,12 @@ class IterationDetailView(View):
                 ).filter(pk=form.detail_id, iteration=iteration).first()
                 if not detail:
                     return json_response(error='详情不存在或已被移除')
+                scope_error = get_iteration_scope_error(
+                    request.user,
+                    iteration,
+                )
+                if scope_error:
+                    return json_response(error=scope_error)
                 remove_error = get_iteration_detail_remove_error(detail)
                 if remove_error:
                     return json_response(error=remove_error)

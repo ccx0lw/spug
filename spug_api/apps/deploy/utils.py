@@ -7,6 +7,8 @@ from django.conf import settings
 from django.db import close_old_connections, transaction
 from libs.utils import AttrDict, human_time, human_datetime, parse_time, render_str, render_str_or_empty
 from apps.host.models import Host
+from apps.account.utils import has_host_perm
+from apps.app.utils import has_deploy_scope
 from apps.config.utils import compose_configs
 from apps.config.models import ContainerRepository, FileTemplate
 from apps.repository.models import Repository
@@ -35,6 +37,37 @@ def scoped_deploy_requests(user):
         deploy__app_id__in=perms['apps'],
         deploy__env_id__in=perms['envs'],
     )
+
+
+def get_iteration_scope_error(user, iteration, details=None):
+    if user.is_supper:
+        return ''
+    perms = user.deploy_perms
+    if iteration.env_id not in perms['envs']:
+        return '未找到指定迭代或无操作权限'
+    details = list(details if details is not None else iteration.details.all())
+    if any(not has_deploy_scope(user, detail.deploy) for detail in details):
+        return '未找到指定迭代或无操作权限'
+    return ''
+
+
+def get_deploy_execution_scope_error(user, deploy):
+    if not has_deploy_scope(user, deploy):
+        return '无权访问目标应用或环境'
+    try:
+        host_ids = json.loads(deploy.host_ids)
+    except (TypeError, ValueError):
+        return '发布配置的目标主机格式错误'
+    if not has_host_perm(user, host_ids):
+        return '无权访问发布目标主机'
+    if deploy.extend == '3':
+        extend = deploy.extend_obj
+        if not extend or not has_host_perm(
+                user,
+                extend.build_image_host_id,
+        ):
+            return '无权访问镜像构建主机'
+    return ''
 
 
 def lock_deploy_and_get_running_request(deploy_id):
@@ -398,6 +431,42 @@ def dispatch(req, fail_mode=False):
         Helper.send_deploy_notify(req)
 
 
+def dispatch_iteration_request(request_id, actor_id, fail_mode=False):
+    """迭代后台任务执行前重新校验操作者的对象和主机范围。"""
+    from apps.account.models import User
+
+    close_old_connections()
+    req = DeployRequest.objects.select_related(
+        'deploy',
+        'deploy__app',
+        'deploy__env',
+    ).filter(
+        pk=request_id,
+        status='2',
+    ).first()
+    actor = User.objects.filter(
+        pk=actor_id,
+        is_active=True,
+        deleted_at__isnull=True,
+    ).first()
+    scope_error = (
+        get_deploy_execution_scope_error(actor, req.deploy)
+        if actor and req else '发布操作者不存在或已停用'
+    )
+    if scope_error:
+        if req:
+            req.status = '-3'
+            req.failed_at = human_datetime()
+            DeployRequest.objects.filter(pk=req.id).update(
+                status=req.status,
+                failed_at=req.failed_at,
+            )
+            _update_iteration_detail_status(req)
+        close_old_connections()
+        return
+    dispatch(req, fail_mode)
+
+
 def _update_iteration_detail_status(req):
     """发布完成后同步更新迭代明细状态和迭代整体状态"""
     try:
@@ -642,8 +711,8 @@ def _try_dispatch_queued_requests(iteration, env_id):
             )
             transaction.on_commit(
                 lambda req=pending_req: Thread(
-                    target=dispatch,
-                    args=(req, False),
+                    target=dispatch_iteration_request,
+                    args=(req.id, req.do_by_id, False),
                 ).start()
             )
             dispatched += 1
@@ -765,8 +834,8 @@ def _recover_on_startup():
                         )
                         transaction.on_commit(
                             lambda req=pending_req: Thread(
-                                target=dispatch,
-                                args=(req, False),
+                                target=dispatch_iteration_request,
+                                args=(req.id, req.do_by_id, False),
                             ).start()
                         )
                         dispatched_total += 1
