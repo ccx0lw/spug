@@ -6,7 +6,11 @@ from django.db.models import F
 from django.http.response import HttpResponseBadRequest
 from libs import json_response, JsonParser, Argument, AttrDict, auth
 from apps.setting.utils import AppSetting
-from apps.account.utils import get_host_perms
+from apps.account.utils import (
+    get_host_perms,
+    has_group_perm,
+    has_host_management_scope,
+)
 from apps.host.models import Host, Group
 from apps.host.utils import batch_sync_host, _sync_host_extend
 from apps.exec.models import ExecTemplate
@@ -45,6 +49,15 @@ class HostView(View):
             Argument('password', required=False),
         ).parse(request.body)
         if error is None:
+            required_perm = 'host.host.edit' if form.id else 'host.host.add'
+            if not request.user.has_perms([required_perm]):
+                return json_response(error='权限拒绝')
+            if not has_group_perm(request.user, form.group_ids):
+                return json_response(error='无权访问目标主机分组')
+            if form.id:
+                host = Host.objects.filter(pk=form.id).first()
+                if not host or not has_host_management_scope(request.user, host):
+                    return json_response(error='无权访问目标主机')
             if not _do_host_verify(form):
                 return json_response('auth fail')
 
@@ -53,8 +66,9 @@ class HostView(View):
             if other and (not form.id or other.id != form.id):
                 return json_response(error=f'已存在的主机名称【{form.name}】')
             if form.id:
-                Host.objects.filter(pk=form.id).update(is_verified=True, **form)
-                host = Host.objects.get(pk=form.id)
+                host_id = form.pop('id')
+                Host.objects.filter(pk=host_id).update(is_verified=True, **form)
+                host = Host.objects.get(pk=host_id)
             else:
                 host = Host.objects.create(created_by=request.user, is_verified=True, **form)
             host.groups.set(group_ids)
@@ -63,13 +77,15 @@ class HostView(View):
             return json_response(response)
         return json_response(error=error)
 
-    @auth('host.host.add|host.host.edit')
+    @auth('host.host.edit')
     def put(self, request):
         form, error = JsonParser(
             Argument('id', type=int, help='参数错误')
         ).parse(request.body)
         if error is None:
-            host = Host.objects.get(pk=form.id)
+            host = Host.objects.filter(pk=form.id).first()
+            if not host or not has_host_management_scope(request.user, host):
+                return json_response(error='无权访问目标主机')
             with host.get_ssh() as ssh:
                 _sync_host_extend(host, ssh=ssh)
         return json_response(error=error)
@@ -102,10 +118,19 @@ class HostView(View):
             if form.id:
                 host_ids = [form.id]
             elif form.group_id:
-                group = Group.objects.get(pk=form.group_id)
+                if not has_group_perm(request.user, form.group_id):
+                    return json_response(error='无权访问目标主机分组')
+                group = Group.objects.filter(pk=form.group_id).first()
+                if not group:
+                    return json_response(error='未找到指定分组')
                 host_ids = [x.id for x in group.hosts.all()]
             else:
                 return json_response(error='参数错误')
+            hosts = list(Host.objects.filter(id__in=host_ids).prefetch_related('groups'))
+            if len(hosts) != len(set(host_ids)) or any(
+                    not has_host_management_scope(request.user, host)
+                    for host in hosts):
+                return json_response(error='无权访问目标主机')
             for host_id in host_ids:
                 regex = fr'[^0-9]{host_id}[^0-9]'
                 deploy = Deploy.objects.filter(host_ids__regex=regex) \
@@ -128,6 +153,10 @@ class HostView(View):
 @auth('host.host.add')
 def post_import(request):
     group_id = request.POST.get('group_id')
+    if not has_group_perm(request.user, group_id):
+        return json_response(error='无权访问目标主机分组')
+    if not Group.objects.filter(pk=group_id).exists():
+        return json_response(error='未找到指定分组')
     file = request.FILES['file']
     hosts = []
     ws = load_workbook(file, read_only=True)['Sheet1']
@@ -182,10 +211,14 @@ def batch_valid(request):
         Argument('range', filter=lambda x: x in ('1', '2'), help='参数错误')
     ).parse(request.body)
     if error is None:
+        allowed_host_ids = get_host_perms(request.user)
         if form.range == '1':  # all hosts
-            hosts = Host.objects.all()
+            hosts = Host.objects.filter(id__in=allowed_host_ids)
         else:
-            hosts = Host.objects.filter(is_verified=False).all()
+            hosts = Host.objects.filter(
+                id__in=allowed_host_ids,
+                is_verified=False,
+            )
         token = uuid.uuid4().hex
         Thread(target=batch_sync_host, args=(token, hosts, form.password)).start()
         return json_response({'token': token, 'hosts': {x.id: {'name': x.name} for x in hosts}})

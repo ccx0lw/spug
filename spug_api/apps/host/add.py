@@ -3,6 +3,7 @@
 # Released under the AGPL-3.0 License.
 from libs import json_response, JsonParser, Argument, auth
 from apps.host.models import Host, HostExtend, Group
+from apps.account.utils import has_group_perm, has_host_management_scope
 from apps.host import utils
 import json
 
@@ -39,6 +40,8 @@ def cloud_import(request):
         Argument('host_type', filter=lambda x: x in ('public', 'private'), help='请选择连接地址'),
     ).parse(request.body)
     if error is None:
+        if not has_group_perm(request.user, form.group_id):
+            return json_response(error='无权访问目标主机分组')
         group = Group.objects.filter(pk=form.group_id).first()
         if not group:
             return json_response(error='未找到指定分组')
@@ -46,6 +49,16 @@ def cloud_import(request):
             instances = utils.fetch_ali_instances(form.ak, form.ac, form.region_id)
         else:
             instances = utils.fetch_tencent_instances(form.ak, form.ac, form.region_id)
+
+        existing_hosts = Host.objects.filter(
+            hostextend__instance_id__in=[
+                item['instance_id'] for item in instances
+            ],
+        ).prefetch_related('groups')
+        if any(
+                not has_host_management_scope(request.user, host)
+                for host in existing_hosts):
+            return json_response(error='无权访问目标主机')
 
         host_add_ids = []
         for item in instances:

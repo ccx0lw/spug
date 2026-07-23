@@ -5,11 +5,12 @@ from django.views.generic import View
 from libs import json_response, JsonParser, Argument, human_datetime, auth
 from apps.host.models import Host, HostExtend
 from apps.host.utils import check_os_type, fetch_host_extend
+from apps.account.utils import has_host_management_scope
 import json
 
 
 class ExtendView(View):
-    @auth('host.host.add|host.host.edit')
+    @auth('host.host.edit')
     def get(self, request):
         form, error = JsonParser(
             Argument('host_id', type=int, help='参数错误')
@@ -18,6 +19,8 @@ class ExtendView(View):
             host = Host.objects.filter(pk=form.host_id).first()
             if not host:
                 return json_response(error='未找到指定主机')
+            if not has_host_management_scope(request.user, host):
+                return json_response(error='无权访问目标主机')
             if not host.is_verified:
                 return json_response(error='该主机还未验证')
             with host.get_ssh() as ssh:
@@ -25,7 +28,7 @@ class ExtendView(View):
             return json_response(response)
         return json_response(error=error)
 
-    @auth('host.host.add|host.host.edit')
+    @auth('host.host.edit')
     def post(self, request):
         form, error = JsonParser(
             Argument('host_id', type=int, help='参数错误'),
@@ -43,6 +46,8 @@ class ExtendView(View):
         ).parse(request.body)
         if error is None:
             host = Host.objects.filter(pk=form.host_id).first()
+            if not host or not has_host_management_scope(request.user, host):
+                return json_response(error='无权访问目标主机')
             form.disk = json.dumps(form.disk)
             form.public_ip_address = json.dumps(form.public_ip_address) if form.public_ip_address else '[]'
             form.private_ip_address = json.dumps(form.private_ip_address)
