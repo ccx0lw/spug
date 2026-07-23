@@ -29,7 +29,7 @@ class Host(models.Model, ModelMixin):
         return SSH(self.hostname, self.port, self.username, pkey, default_env=default_env)
 
     def to_view(self):
-        tmp = self.to_dict()
+        tmp = self.to_dict(excludes=('pkey',))
         if hasattr(self, 'hostextend'):
             tmp.update(self.hostextend.to_view())
         tmp['group_ids'] = []

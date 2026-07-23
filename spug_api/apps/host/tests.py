@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
+from apps.account.models import User
+from apps.host.models import Host
 from libs.ssh import SSH, _finalize_pubkey_algorithm
 
 
@@ -76,3 +78,29 @@ class AddPublicKeyTests(SimpleTestCase):
 
         with self.assertRaisesRegex(Exception, '写入 SSH 公钥失败'):
             ssh.add_public_key('ssh-rsa AAAATEST spug')
+
+
+class HostSerializationSecurityTests(TestCase):
+    def test_host_inventory_never_returns_private_key(self):
+        creator = User.objects.create(
+            username='host-admin',
+            nickname='主机管理员',
+            password_hash='-',
+            access_token='',
+            last_login='',
+            last_ip='',
+            is_supper=True,
+        )
+        host = Host.objects.create(
+            name='生产主机',
+            hostname='10.0.0.10',
+            port=22,
+            username='deploy',
+            pkey='-----BEGIN PRIVATE KEY-----secret',
+            created_by=creator,
+        )
+
+        response = host.to_view()
+
+        self.assertNotIn('pkey', response)
+        self.assertEqual('10.0.0.10', response['hostname'])
