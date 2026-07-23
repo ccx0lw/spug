@@ -30,6 +30,7 @@ from apps.deploy.utils import (
     get_running_deploy_error,
     lock_deploy_and_get_running_request,
     reconcile_iteration_detail_statuses,
+    scoped_deploy_requests,
 )
 from apps.host.models import Host
 from apps.config.models import Environment
@@ -182,7 +183,9 @@ class RequestView(View):
                 # 验证单个删除权限
                 if not request.user.has_perms(['deploy.request.del']):
                     return json_response(error='无删除权限')
-                deploy = DeployRequest.objects.filter(pk=form.id).first()
+                deploy = scoped_deploy_requests(request.user).filter(
+                    pk=form.id
+                ).first()
                 if not deploy or deploy.status not in ('0', '1', '-1'):
                     return json_response(error='未找到指定发布申请或当前状态不允许删除')
                 deploy_id, deploy_name = deploy.id, deploy.name
@@ -224,7 +227,7 @@ class RequestView(View):
 class RequestDetailView(View):
     @auth('deploy.request.view')
     def get(self, request, r_id):
-        req = DeployRequest.objects.filter(pk=r_id).first()
+        req = scoped_deploy_requests(request.user).filter(pk=r_id).first()
         if not req:
             return json_response(error='未找到指定发布申请')
         hosts = Host.objects.filter(id__in=json.loads(req.host_ids))
@@ -382,7 +385,7 @@ class RequestDetailView(View):
             Argument('is_pass', type=bool, help='参数错误')
         ).parse(request.body)
         if error is None:
-            req = DeployRequest.objects.filter(pk=r_id).first()
+            req = scoped_deploy_requests(request.user).filter(pk=r_id).first()
             if not req:
                 return json_response(error='未找到指定申请')
             if not form.is_pass and not form.reason:
@@ -417,7 +420,27 @@ def post_request_ext1(request):
         Argument('desc', required=False),
     ).parse(request.body)
     if error is None:
-        deploy = Deploy.objects.get(pk=form.deploy_id)
+        is_edit = bool(form.id)
+        required_perm = (
+            'deploy.request.edit' if is_edit else 'deploy.request.add'
+        )
+        if not request.user.has_perms([required_perm]):
+            return json_response(error='权限拒绝')
+        deploy = scoped_deploys(request.user).filter(
+            pk=form.deploy_id,
+            extend='1',
+        ).first()
+        if not deploy:
+            return json_response(error='未找到发布配置或无操作权限')
+        req = None
+        if is_edit:
+            req = scoped_deploy_requests(request.user).filter(
+                pk=form.id,
+                deploy__extend='1',
+                status__in=('0', '-1'),
+            ).first()
+            if not req:
+                return json_response(error='未找到可编辑的发布申请或无操作权限')
         form.spug_version = Repository.make_spug_version(deploy.id)
         if form.extra[0] == 'tag':
             if not form.extra[1]:
@@ -430,7 +453,12 @@ def post_request_ext1(request):
         elif form.extra[0] == 'repository':
             if not form.extra[1]:
                 return json_response(error='请选择要发布的版本')
-            repository = Repository.objects.get(pk=form.extra[1])
+            repository = Repository.objects.filter(
+                pk=form.extra[1],
+                deploy=deploy,
+            ).first()
+            if not repository:
+                return json_response(error='未找到构建记录或无操作权限')
             form.repository_id = repository.id
             form.version = repository.version
             form.spug_version = repository.spug_version
@@ -450,9 +478,7 @@ def post_request_ext1(request):
         form.status = '0' if deploy.is_audit else '1'
         # form.host_ids = json.dumps(sorted(form.host_ids))
         form.host_ids = deploy.host_ids
-        is_edit = bool(form.id)
         if is_edit:
-            req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
             DeployRequest.objects.filter(pk=form.id).update(created_by=request.user, reason=None, **form)
         else:
@@ -480,7 +506,13 @@ def post_request_ext1_rollback(request):
     ).parse(request.body)
     
     if error is None:
-        req = DeployRequest.objects.get(pk=form.pop('request_id'))
+        req = scoped_deploy_requests(request.user).filter(
+            pk=form.pop('request_id'),
+            deploy__extend='1',
+            status__in=('3', '-3'),
+        ).first()
+        if not req:
+            return json_response(error='未找到可回滚的发布申请或无操作权限')
         requests = DeployRequest.objects.filter(deploy=req.deploy, status__in=('3', '-3'))
         versions = list({x.spug_version: 1 for x in requests}.keys())
         if req.spug_version not in versions[:req.deploy.extend_obj.versions + 1]:
@@ -521,9 +553,27 @@ def post_request_ext2(request):
         Argument('desc', required=False),
     ).parse(request.body)
     if error is None:
-        deploy = Deploy.objects.filter(pk=form.deploy_id).first()
+        is_edit = bool(form.id)
+        required_perm = (
+            'deploy.request.edit' if is_edit else 'deploy.request.add'
+        )
+        if not request.user.has_perms([required_perm]):
+            return json_response(error='权限拒绝')
+        deploy = scoped_deploys(request.user).filter(
+            pk=form.deploy_id,
+            extend='2',
+        ).first()
         if not deploy:
-            return json_response(error='未找到该发布配置')
+            return json_response(error='未找到发布配置或无操作权限')
+        req = None
+        if is_edit:
+            req = scoped_deploy_requests(request.user).filter(
+                pk=form.id,
+                deploy__extend='2',
+                status__in=('0', '-1'),
+            ).first()
+            if not req:
+                return json_response(error='未找到可编辑的发布申请或无操作权限')
         extra = form.pop('extra')
         if DeployExtend2.objects.filter(deploy=deploy, host_actions__contains='"src_mode": "1"').exists():
             if not extra:
@@ -536,9 +586,7 @@ def post_request_ext2(request):
         form.status = '0' if deploy.is_audit else '1'
         # form.host_ids = json.dumps(form.host_ids)
         form.host_ids = deploy.host_ids
-        is_edit = bool(form.id)
         if is_edit:
-            req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
             form.update(created_by=request.user, reason=None)
             req.update_by_dict(form)
@@ -569,7 +617,27 @@ def post_request_ext3(request):
         Argument('desc', required=False),
     ).parse(request.body)
     if error is None:
-        deploy = Deploy.objects.get(pk=form.deploy_id)
+        is_edit = bool(form.id)
+        required_perm = (
+            'deploy.request.edit' if is_edit else 'deploy.request.add'
+        )
+        if not request.user.has_perms([required_perm]):
+            return json_response(error='权限拒绝')
+        deploy = scoped_deploys(request.user).filter(
+            pk=form.deploy_id,
+            extend='3',
+        ).first()
+        if not deploy:
+            return json_response(error='未找到发布配置或无操作权限')
+        req = None
+        if is_edit:
+            req = scoped_deploy_requests(request.user).filter(
+                pk=form.id,
+                deploy__extend='3',
+                status__in=('0', '-1'),
+            ).first()
+            if not req:
+                return json_response(error='未找到可编辑的发布申请或无操作权限')
         form.spug_version = Repository.make_spug_version(deploy.id)
         # 不是重启类型才需要验证
         if form.type != '0':
@@ -584,7 +652,12 @@ def post_request_ext3(request):
             elif form.extra[0] == 'repository':
                 if not form.extra[1]:
                     return json_response(error='请选择要发布的版本')
-                repository = Repository.objects.get(pk=form.extra[1])
+                repository = Repository.objects.filter(
+                    pk=form.extra[1],
+                    deploy=deploy,
+                ).first()
+                if not repository:
+                    return json_response(error='未找到构建记录或无操作权限')
                 form.repository_id = repository.id
                 form.version = repository.version
                 form.spug_version = repository.spug_version
@@ -592,7 +665,12 @@ def post_request_ext3(request):
             elif form.extra[0] == 'docker_image':
                 if not form.extra[1]:
                     return json_response(error='请选择要发布的镜像版本')
-                dockerImage = DockerImage.objects.get(id=form.extra[1])
+                dockerImage = DockerImage.objects.filter(
+                    id=form.extra[1],
+                    deploy=deploy,
+                ).first()
+                if not dockerImage:
+                    return json_response(error='未找到镜像记录或无操作权限')
                 form.docker_image_id = dockerImage.id
                 # form.repository_id = dockerImage.repository.id
                 form.version = dockerImage.version
@@ -619,9 +697,7 @@ def post_request_ext3(request):
         form.status = '0' if deploy.is_audit else '1'
         # form.host_ids = json.dumps(sorted(form.host_ids))
         form.host_ids = deploy.host_ids
-        is_edit = bool(form.id)
         if is_edit:
-            req = DeployRequest.objects.get(pk=form.id)
             is_required_notify = deploy.is_audit and req.status == '-1'
             DeployRequest.objects.filter(pk=form.id).update(created_by=request.user, reason=None, **form)
         else:
@@ -644,14 +720,16 @@ def get_request_info(request):
         Argument('id', type=int, help='参数错误')
     ).parse(request.GET)
     if error is None:
-        req = DeployRequest.objects.select_related(
+        req = scoped_deploy_requests(request.user).filter(
+            pk=form.id
+        ).select_related(
             'deploy',
             'deploy__app',
             'deploy__env',
             'created_by',
             'approve_by',
             'do_by',
-        ).filter(pk=form.id).first()
+        ).first()
         if not req:
             return json_response(error='未找到指定发布申请')
         response = req.to_dict(selects=(

@@ -26,6 +26,17 @@ REPOS_DIR = settings.REPOS_DIR
 BUILD_DIR = settings.BUILD_DIR
 
 
+def scoped_deploy_requests(user):
+    queryset = DeployRequest.objects.all()
+    if user.is_supper:
+        return queryset
+    perms = user.deploy_perms
+    return queryset.filter(
+        deploy__app_id__in=perms['apps'],
+        deploy__env_id__in=perms['envs'],
+    )
+
+
 def lock_deploy_and_get_running_request(deploy_id):
     """锁定应用在指定环境的发布配置，并返回当前正在发布的申请。
 

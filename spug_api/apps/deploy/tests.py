@@ -20,10 +20,15 @@ from apps.deploy.models import (
 from apps.deploy.views import (
     IterationDetailView,
     OperationLogView,
+    RequestDetailView,
     RequestView,
     do_upload,
     get_request_info,
+    post_request_ext1,
+    post_request_ext1_rollback,
 )
+from apps.app.views import get_info as get_deploy_info
+from apps.app.views import get_versions as get_deploy_versions
 from apps.deploy.utils import (
     get_cross_iteration_warnings,
     get_iteration_detail_remove_error,
@@ -681,3 +686,217 @@ class IterationDetailStatusTests(SimpleTestCase):
 
         self.assertTrue(retry_info['retry_allowed'])
         self.assertEqual('2026-07-17 10:00:00', retry_info['retry_deadline'])
+
+
+class DeployRequestObjectScopeTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.creator = User.objects.create(
+            username='request-scope-admin',
+            nickname='申请管理员',
+            password_hash='-',
+            access_token='',
+            last_login='',
+            last_ip='',
+            is_supper=True,
+        )
+        self.allowed_env = Environment.objects.create(
+            name='授权环境',
+            key='request-scope-allowed-env',
+            created_by=self.creator,
+        )
+        self.denied_env = Environment.objects.create(
+            name='越权环境',
+            key='request-scope-denied-env',
+            created_by=self.creator,
+        )
+        self.allowed_app = App.objects.create(
+            name='授权应用',
+            key='request-scope-allowed-app',
+            created_by=self.creator,
+        )
+        self.denied_app = App.objects.create(
+            name='越权应用',
+            key='request-scope-denied-app',
+            created_by=self.creator,
+        )
+        self.allowed_deploy = self.make_deploy(
+            self.allowed_app,
+            self.allowed_env,
+        )
+        self.denied_deploy = self.make_deploy(
+            self.denied_app,
+            self.denied_env,
+        )
+        self.denied_request = self.make_request(
+            self.denied_deploy,
+            status='0',
+        )
+
+    def make_deploy(self, app, env):
+        return Deploy.objects.create(
+            app=app,
+            env=env,
+            host_ids='[]',
+            extend='1',
+            is_audit=True,
+            rst_notify='[]',
+            created_by=self.creator,
+        )
+
+    def make_request(self, deploy, status='0'):
+        return DeployRequest.objects.create(
+            deploy=deploy,
+            name='对象范围测试申请',
+            type='1',
+            extra=json.dumps(['tag', 'v1.0.0']),
+            host_ids='[]',
+            status=status,
+            version='v1.0.0',
+            spug_version=f'{deploy.id}_test',
+            created_by=self.creator,
+        )
+
+    def scoped_user(self, permissions):
+        return SimpleNamespace(
+            is_supper=False,
+            deploy_perms={
+                'apps': {self.allowed_app.id},
+                'envs': {self.allowed_env.id},
+            },
+            has_perms=lambda codes: bool(set(codes).intersection(permissions)),
+        )
+
+    def decode(self, response):
+        return json.loads(response.content.decode())
+
+    def test_detail_and_info_hide_out_of_scope_request(self):
+        user = self.scoped_user({'deploy.request.view'})
+        detail_request = self.factory.get(
+            f'/api/deploy/request/{self.denied_request.id}/'
+        )
+        detail_request.user = user
+        info_request = self.factory.get(
+            '/api/deploy/request/info/',
+            data={'id': self.denied_request.id},
+        )
+        info_request.user = user
+
+        detail = self.decode(
+            RequestDetailView.as_view()(
+                detail_request,
+                r_id=self.denied_request.id,
+            )
+        )
+        info = self.decode(get_request_info(info_request))
+
+        self.assertIn('未找到', detail['error'])
+        self.assertIn('未找到', info['error'])
+
+    def test_delete_and_approve_cannot_mutate_out_of_scope_request(self):
+        delete_request = self.factory.delete(
+            f'/api/deploy/request/?id={self.denied_request.id}'
+        )
+        delete_request.user = self.scoped_user({'deploy.request.del'})
+        approve_request = self.factory.patch(
+            f'/api/deploy/request/{self.denied_request.id}/',
+            data=json.dumps({'is_pass': True}),
+            content_type='application/json',
+        )
+        approve_request.user = self.scoped_user(
+            {'deploy.request.approve'}
+        )
+
+        deleted = self.decode(RequestView.as_view()(delete_request))
+        approved = self.decode(
+            RequestDetailView.as_view()(
+                approve_request,
+                r_id=self.denied_request.id,
+            )
+        )
+
+        self.assertIn('未找到', deleted['error'])
+        self.assertIn('未找到', approved['error'])
+        self.denied_request.refresh_from_db()
+        self.assertEqual('0', self.denied_request.status)
+
+    def test_add_only_permission_cannot_edit_request(self):
+        request_obj = self.make_request(self.allowed_deploy, status='0')
+        request = self.factory.post(
+            '/api/deploy/request/ext1/',
+            data=json.dumps({
+                'id': request_obj.id,
+                'deploy_id': self.allowed_deploy.id,
+                'name': '不应被修改',
+                'extra': ['tag', 'v2.0.0'],
+            }),
+            content_type='application/json',
+        )
+        request.user = self.scoped_user({'deploy.request.add'})
+
+        result = self.decode(post_request_ext1(request))
+
+        self.assertEqual('权限拒绝', result['error'])
+        request_obj.refresh_from_db()
+        self.assertEqual('对象范围测试申请', request_obj.name)
+
+    def test_queued_request_cannot_be_retargeted(self):
+        request_obj = self.make_request(self.allowed_deploy, status='1')
+        request = self.factory.post(
+            '/api/deploy/request/ext1/',
+            data=json.dumps({
+                'id': request_obj.id,
+                'deploy_id': self.allowed_deploy.id,
+                'name': '排队申请篡改',
+                'extra': ['tag', 'v2.0.0'],
+            }),
+            content_type='application/json',
+        )
+        request.user = self.scoped_user({'deploy.request.edit'})
+
+        result = self.decode(post_request_ext1(request))
+
+        self.assertIn('未找到可编辑', result['error'])
+        request_obj.refresh_from_db()
+        self.assertEqual('对象范围测试申请', request_obj.name)
+
+    def test_rollback_and_deploy_metadata_are_scope_filtered(self):
+        self.denied_request.status = '3'
+        self.denied_request.save(update_fields=('status',))
+        rollback_request = self.factory.post(
+            '/api/deploy/request/ext1/rollback/',
+            data=json.dumps({
+                'request_id': self.denied_request.id,
+                'name': '越权回滚',
+            }),
+            content_type='application/json',
+        )
+        rollback_request.user = self.scoped_user({'deploy.request.do'})
+        deploy_info_request = self.factory.get(
+            f'/api/app/deploy/{self.denied_deploy.id}/'
+        )
+        deploy_info_request.user = self.scoped_user(
+            {'deploy.request.view'}
+        )
+        versions_request = self.factory.get(
+            f'/api/app/deploy/{self.denied_deploy.id}/versions/'
+        )
+        versions_request.user = self.scoped_user(
+            {'deploy.request.add'}
+        )
+
+        rollback = self.decode(post_request_ext1_rollback(rollback_request))
+        deploy_info = self.decode(
+            get_deploy_info(deploy_info_request, self.denied_deploy.id)
+        )
+        versions = self.decode(
+            get_deploy_versions(versions_request, self.denied_deploy.id)
+        )
+
+        self.assertIn('无操作权限', rollback['error'])
+        self.assertIn('无操作权限', deploy_info['error'])
+        self.assertIn('无操作权限', versions['error'])
+        self.assertEqual(
+            1,
+            DeployRequest.objects.filter(deploy=self.denied_deploy).count(),
+        )

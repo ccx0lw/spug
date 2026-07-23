@@ -262,17 +262,19 @@ class DeployView(View):
     
 @auth('deploy.app.view|deploy.request.view')
 def get_info(request, deploy_id):
-    deploys = Deploy.objects.filter(pk=deploy_id) \
+    deploys = scoped_deploys(request.user).filter(pk=deploy_id) \
         .annotate(app_name=F('app__name'), app_key=F('app__key'), app_rel_tags=F('app__rel_tags'), env_name=F('env__name'), env_prod=F('env__prod')) \
         .order_by('-app__sort_id').first()
+    if not deploys:
+        return json_response(error='未找到发布配置或无操作权限')
     return json_response(deploys)
 
 @auth('deploy.app.config|deploy.repository.add|deploy.request.add|deploy.request.edit')
 def get_versions(request, d_id):
     from django.core.cache import cache
-    deploy = Deploy.objects.filter(pk=d_id).first()
+    deploy = scoped_deploys(request.user).filter(pk=d_id).first()
     if not deploy:
-        return json_response(error='未找到指定应用')
+        return json_response(error='未找到发布配置或无操作权限')
     if deploy.extend == '2':
         return json_response(error='该应用不支持此操作')
     # 强制刷新参数：?refresh=1 时跳过缓存重新拉取
