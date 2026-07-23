@@ -299,13 +299,30 @@ class CrossIterationWarningTests(TestCase):
             created_by=self.user,
         )
 
-    def create_detail(self, iteration, version, status='0', request_id=None):
+    def create_detail(
+            self, iteration, version, status='0', request_id=None, deploy=None):
         return DeployIterationDetail.objects.create(
             iteration=iteration,
-            deploy=self.deploy,
+            deploy=deploy or self.deploy,
             version=version,
             status=status,
             request_id=request_id,
+            created_by=self.user,
+        )
+
+    def create_deploy(self, suffix):
+        app = App.objects.create(
+            name=f'订单服务-{suffix}',
+            key=f'order-service-{suffix}',
+            created_by=self.user,
+        )
+        return Deploy.objects.create(
+            app=app,
+            env=self.env,
+            host_ids='[]',
+            extend='1',
+            is_audit=False,
+            rst_notify='[]',
             created_by=self.user,
         )
 
@@ -755,6 +772,73 @@ class CrossIterationWarningTests(TestCase):
         self.assertEqual(
             '移除应用【库存服务】（环境【预发布环境】）',
             operation_log.action,
+        )
+
+    def test_batch_remove_pending_details_by_environment(self):
+        first = self.create_detail(self.iteration, 'v1.0.0')
+        second = self.create_detail(
+            self.iteration,
+            'v1.0.1',
+            deploy=self.create_deploy('batch-second'),
+        )
+        published = self.create_detail(
+            self.iteration,
+            'v1.0.2',
+            status='2',
+            deploy=self.create_deploy('batch-published'),
+        )
+        request = RequestFactory().delete(
+            f'/api/deploy/iteration/detail/?iteration_id={self.iteration.id}'
+            f'&env_id={self.env.id}',
+        )
+        request.user = self.user
+
+        response = IterationDetailView.as_view()(request)
+        payload = json.loads(response.content.decode('utf-8'))
+
+        self.assertFalse(payload['error'])
+        self.assertEqual(2, payload['data']['removed_count'])
+        self.assertCountEqual(
+            [first.id, second.id],
+            payload['data']['removed_ids'],
+        )
+        self.assertFalse(DeployIterationDetail.objects.filter(
+            pk__in=(first.id, second.id)
+        ).exists())
+        self.assertTrue(DeployIterationDetail.objects.filter(pk=published.id).exists())
+        self.iteration.refresh_from_db()
+        self.assertEqual('2', self.iteration.status)
+        self.assertEqual(
+            2,
+            DeployOperationLog.objects.filter(
+                target_type='iteration',
+                target_id=self.iteration.id,
+                action__startswith='移除应用',
+            ).count(),
+        )
+
+    def test_batch_remove_keeps_at_least_one_iteration_detail(self):
+        first = self.create_detail(self.iteration, 'v1.0.0')
+        second = self.create_detail(
+            self.iteration,
+            'v1.0.1',
+            deploy=self.create_deploy('batch-only-second'),
+        )
+        request = RequestFactory().delete(
+            f'/api/deploy/iteration/detail/?iteration_id={self.iteration.id}'
+            f'&env_id={self.env.id}',
+        )
+        request.user = self.user
+
+        response = IterationDetailView.as_view()(request)
+        payload = json.loads(response.content.decode('utf-8'))
+
+        self.assertIn('至少保留一个应用', payload['error'])
+        self.assertEqual(
+            2,
+            DeployIterationDetail.objects.filter(
+                pk__in=(first.id, second.id)
+            ).count(),
         )
 
 

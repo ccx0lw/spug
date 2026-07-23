@@ -2562,10 +2562,22 @@ class IterationDetailView(View):
     def delete(self, request):
         """移除尚未开始镜像预传或发布的迭代明细。"""
         form, error = JsonParser(
-            Argument('detail_id', type=int, required=True, help='详情ID必填'),
+            Argument('detail_id', type=int, required=False),
+            Argument('iteration_id', type=int, required=False),
+            Argument('env_id', type=int, required=False),
         ).parse(request.GET)
         if error is not None:
             return json_response(error=error)
+        if form.detail_id is None:
+            if form.iteration_id is None or form.env_id is None:
+                return json_response(error='详情ID或迭代和环境ID必填')
+            return self._delete_pending_by_env(
+                request,
+                form.iteration_id,
+                form.env_id,
+            )
+        if form.iteration_id is not None or form.env_id is not None:
+            return json_response(error='单个移除和批量移除参数不能同时使用')
 
         try:
             detail_snapshot = DeployIterationDetail.objects.filter(pk=form.detail_id).only(
@@ -2617,5 +2629,77 @@ class IterationDetailView(View):
             })
         except DeployIteration.DoesNotExist:
             return json_response(error='迭代不存在')
+        except Exception as e:
+            return json_response(error=str(e))
+
+    def _delete_pending_by_env(self, request, iteration_id, env_id):
+        """批量移除同一环境内仍满足单项移除规则的迭代明细。"""
+        try:
+            with transaction.atomic():
+                iteration = DeployIteration.objects.select_for_update().filter(
+                    pk=iteration_id
+                ).first()
+                if not iteration:
+                    return json_response(error='迭代不存在')
+                scope_error = get_iteration_scope_error(request.user, iteration)
+                if scope_error:
+                    return json_response(error=scope_error)
+
+                env_details = list(
+                    DeployIterationDetail.objects.select_for_update().select_related(
+                        'deploy', 'deploy__app', 'deploy__env'
+                    ).filter(
+                        iteration=iteration,
+                        deploy__env_id=env_id,
+                    ).order_by('sequence', 'id')
+                )
+                if not env_details:
+                    return json_response(error='该环境没有迭代应用')
+
+                removable_details = [
+                    detail for detail in env_details
+                    if get_iteration_detail_remove_error(detail) is None
+                ]
+                if not removable_details:
+                    return json_response(error='该环境没有可移除的待发布应用')
+                if iteration.details.count() <= len(removable_details):
+                    return json_response(error='批量移除后迭代将没有应用，请至少保留一个应用')
+
+                removed_ids = [detail.id for detail in removable_details]
+                removed_names = [
+                    detail.deploy.app.name
+                    for detail in removable_details
+                    if detail.deploy and detail.deploy.app
+                ]
+                env_name = (
+                    removable_details[0].deploy.env.name
+                    if removable_details[0].deploy and removable_details[0].deploy.env
+                    else str(env_id)
+                )
+                DeployIterationDetail.objects.filter(pk__in=removed_ids).delete()
+
+                remaining_statuses = iteration.details.values_list('status', flat=True)
+                new_status = get_iteration_overall_status(remaining_statuses)
+                if new_status and iteration.status != new_status:
+                    iteration.status = new_status
+                    iteration.save()
+                iteration_status = new_status or iteration.status
+
+                for detail in removable_details:
+                    record_deploy_operation(
+                        'iteration',
+                        iteration.id,
+                        iteration.name,
+                        format_app_environment_action('移除', detail.deploy),
+                        request.user,
+                    )
+
+            return json_response({
+                'message': f'已从【{env_name}】环境移除 {len(removed_ids)} 个应用',
+                'removed_count': len(removed_ids),
+                'removed_ids': removed_ids,
+                'removed_apps': removed_names,
+                'iteration_status': iteration_status,
+            })
         except Exception as e:
             return json_response(error=str(e))

@@ -241,5 +241,21 @@ class Store {
       return res;
     });
   };
+
+  // 批量移除同一环境下尚未开始镜像预传或发布的应用
+  removeIterationDetails = (iterationId, envId) => {
+    return http.delete('/api/deploy/iteration/detail/', {
+      params: {
+        iteration_id: iterationId,
+        env_id: envId
+      }
+    }).then(res => {
+      if (this.record.id) {
+        this.fetchPublishStatus(this.record.id);
+      }
+      this.fetchRecords();
+      return res;
+    });
+  };
 }
 export default new Store()

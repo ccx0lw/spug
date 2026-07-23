@@ -37,6 +37,7 @@ function Publish() {
   const [versionOptions, setVersionOptions] = useState({});    // 版本选项缓存 {detailId: versions}
   const [versionLoading, setVersionLoading] = useState(null);  // 正在加载版本的 detail id
   const [removingDetail, setRemovingDetail] = useState(null);
+  const [removingEnv, setRemovingEnv] = useState(null);
 
   // 自动刷新状态
   useEffect(() => {
@@ -348,6 +349,71 @@ function Publish() {
           })
           .finally(() => {
             setRemovingDetail(null);
+          });
+      },
+    });
+  };
+
+  const handleBatchRemoveDetails = (envStatus, removableDetails) => {
+    const visibleApps = removableDetails.slice(0, 8);
+    const hiddenCount = removableDetails.length - visibleApps.length;
+    Modal.confirm({
+      title: '批量移除待发布应用',
+      icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+      content: (
+        <div className={S.removeDetailConfirm}>
+          <div className={S.removeDetailTarget}>
+            <div className={S.removeDetailTargetRow}>
+              <span className={S.removeDetailLabel}>发布环境</span>
+              <span>
+                <Tag
+                  color={envStatus.is_prod ? 'error' : 'processing'}
+                  className={S.removeDetailEnvTag}>
+                  {envStatus.env_name}
+                </Tag>
+                {envStatus.is_prod && <span className={S.removeDetailProdText}>生产环境</span>}
+              </span>
+            </div>
+            <div className={S.removeDetailTargetRow}>
+              <span className={S.removeDetailLabel}>待移除应用</span>
+              <div className={S.removeDetailAppList}>
+                {visibleApps.map(detail => (
+                  <Tag key={detail.id} className={S.removeDetailAppTag}>
+                    {detail.app_name}
+                  </Tag>
+                ))}
+                {hiddenCount > 0 && <span className={S.removeDetailMoreApps}>另有 {hiddenCount} 个</span>}
+              </div>
+            </div>
+          </div>
+          <div className={S.removeDetailNotice}>
+            <InfoCircleOutlined className={S.removeDetailNoticeIcon} />
+            <div>
+              <div className={S.removeDetailNoticeTitle}>
+                将一次移除 {removableDetails.length} 个待发布应用
+              </div>
+              <div className={S.removeDetailNoticeText}>
+                已预传镜像、已创建发布申请或不处于待发布状态的应用不会被移除。
+              </div>
+            </div>
+          </div>
+        </div>
+      ),
+      okText: `确认移除 ${removableDetails.length} 个`,
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => {
+        setRemovingEnv(envStatus.env_id);
+        return store.removeIterationDetails(record.id, envStatus.env_id)
+          .then(res => {
+            message.success(res.message || `已移除 ${removableDetails.length} 个应用`);
+          })
+          .catch(err => {
+            message.error(err.message || '批量移除应用失败');
+            return Promise.reject(err);
+          })
+          .finally(() => {
+            setRemovingEnv(null);
           });
       },
     });
@@ -665,6 +731,15 @@ function Publish() {
         const isCompleted = success === total;
         const hasContainerApp = has_container || false;
         const canPreUpload = hasContainerApp && pending > 0 && !image_uploading;
+        const removableDetails = (details || []).filter(detail => (
+          detail.status === '0'
+          && detail.image_status === '0'
+          && !detail.docker_image_id
+          && !detail.request_id
+        ));
+        const batchRemovalWouldEmptyIteration = (
+          removableDetails.length >= iterationDetailCount
+        );
         const warningDetails = (details || []).filter(detail => (
           detail.cross_iteration_warning && detail.cross_iteration_warning.has_warning
         ));
@@ -708,6 +783,24 @@ function Publish() {
                 {isCompleted && <Tag color="success" icon={<CheckCircleOutlined />}>已完成</Tag>}
                 {publishing > 0 && <Tag color="warning" icon={<LoadingOutlined spin />}>发布中</Tag>}
                 {failed > 0 && <Tag color="error">{failed} 个失败</Tag>}
+                {removableDetails.length > 1 && (
+                  <Tooltip
+                    title={batchRemovalWouldEmptyIteration ?
+                      '迭代至少需要保留一个应用，不能全部移除' :
+                      `批量移除该环境下 ${removableDetails.length} 个未发布应用`}>
+                    <span>
+                      <Button
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        disabled={batchRemovalWouldEmptyIteration}
+                        loading={removingEnv === env_id}
+                        onClick={() => handleBatchRemoveDetails(envStatus, removableDetails)}>
+                        批量移除 {removableDetails.length}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
                 {hasContainerApp && (
                   <>
                     {image_uploading > 0 && <Tag color="processing" icon={<SyncOutlined spin />}>镜像上传中 ({image_uploading})</Tag>}
