@@ -1,5 +1,6 @@
 import json
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -8,7 +9,12 @@ from django.test import RequestFactory, TestCase, override_settings
 from apps.account.mfa import issue_sensitive_ticket
 from apps.account.models import User
 from apps.exec.models import ExecHistory, Transfer
-from apps.exec.transfer import TransferView
+from apps.exec.transfer import (
+    TransferView,
+    _make_rsync_command,
+    _make_sshfs_command,
+    _remote_is_dir_command,
+)
 from apps.exec.views import TaskView
 from apps.host.models import Host
 from apps.setting.utils import AppSetting
@@ -20,6 +26,59 @@ TEST_CACHES = {
         'LOCATION': 'exec-mfa-tests',
     }
 }
+
+
+class TransferCommandBoundaryTests(TestCase):
+    def test_remote_source_path_is_shell_quoted(self):
+        command = _remote_is_dir_command(
+            '/srv/releases; touch /tmp/spug-transfer-probe'
+        )
+
+        self.assertEqual(
+            "[ -d '/srv/releases; touch /tmp/spug-transfer-probe' ]",
+            command,
+        )
+
+    def test_sshfs_uses_argument_array(self):
+        host = SimpleNamespace(
+            username='deploy',
+            hostname='host.internal',
+            port=22,
+        )
+
+        command = _make_sshfs_command(
+            host,
+            '/srv/releases; touch /tmp/probe',
+            '/tmp/private-key',
+            '/tmp/mount-point',
+        )
+
+        self.assertIsInstance(command, list)
+        self.assertEqual(
+            'deploy@host.internal:/srv/releases; touch /tmp/probe',
+            command[-2],
+        )
+
+    def test_rsync_protects_remote_path_arguments(self):
+        task = SimpleNamespace(
+            host_id=None,
+            src_dir='/tmp/source',
+            dst_dir='/srv/releases; touch /tmp/probe',
+        )
+        host = SimpleNamespace(
+            username='deploy',
+            hostname='host.internal',
+            port=22,
+        )
+
+        command = _make_rsync_command(task, host, '/tmp/private-key')
+
+        self.assertIn('--protect-args', command)
+        self.assertIn('--', command)
+        self.assertEqual(
+            'deploy@host.internal:/srv/releases; touch /tmp/probe',
+            command[-1],
+        )
 
 
 @override_settings(CACHES=TEST_CACHES)

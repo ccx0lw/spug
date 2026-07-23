@@ -20,10 +20,29 @@ from concurrent import futures
 from threading import Thread
 import subprocess
 import tempfile
+import shlex
+import shutil
 import uuid
 import json
 import time
 import os
+
+
+def _remote_is_dir_command(path):
+    return f'[ -d {shlex.quote(path)} ]'
+
+
+def _make_sshfs_command(host, path, private_key_file, base_dir):
+    target = f'{host.username}@{host.hostname}:{path}'
+    return [
+        'sshfs',
+        '-o',
+        'ro',
+        '-o',
+        f'ssh_command=ssh -p {int(host.port or 22)} -i {private_key_file}',
+        target,
+        base_dir,
+    ]
 
 
 class TransferView(View):
@@ -58,18 +77,24 @@ class TransferView(View):
                     return json_response(error='请输入正确的数据源路径')
                 host = Host.objects.get(pk=host_id)
                 with host.get_ssh() as ssh:
-                    code, _ = ssh.exec_command_raw(f'[ -d {path} ]')
+                    code, _ = ssh.exec_command_raw(_remote_is_dir_command(path))
                     if code != 0:
                         return json_response(error='数据源路径必须为该主机上已存在的目录')
                 os.makedirs(base_dir)
                 with tempfile.NamedTemporaryFile(mode='w') as fp:
                     fp.write(host.pkey or AppSetting.get('private_key'))
                     fp.flush()
-                    target = f'{host.username}@{host.hostname}:{path}'
-                    command = f'sshfs -o ro -o ssh_command="ssh -p {host.port} -i {fp.name}" {target} {base_dir}'
-                    task = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    command = _make_sshfs_command(
+                        host, path, fp.name, base_dir
+                    )
+                    task = subprocess.run(
+                        command,
+                        shell=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                    )
                     if task.returncode != 0:
-                        os.system(f'umount -f {base_dir} &> /dev/null ; rm -rf {base_dir}')
+                        _cleanup_transfer_dir(base_dir, mounted=True)
                         return json_response(error=task.stdout.decode())
             else:
                 os.makedirs(base_dir)
@@ -127,12 +152,39 @@ def _dispatch_sync(task):
                     t.token,
                     json.dumps({'key': t.key, 'status': -1, 'data': f'\x1b[31mException: {exc}\x1b[0m'})
                 )
-    if task.host_id:
-        command = f'umount -f {task.src_dir} && rm -rf {task.src_dir}'
-    else:
-        command = f'rm -rf {task.src_dir}'
-    subprocess.run(command, shell=True)
+    _cleanup_transfer_dir(task.src_dir, mounted=bool(task.host_id))
     close_old_connections()
+
+
+def _cleanup_transfer_dir(path, mounted=False):
+    if mounted:
+        subprocess.run(
+            ['umount', '-f', path],
+            shell=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _make_rsync_command(task, host, private_key_file):
+    options = '-azv' if task.host_id else '-rzv'
+    ssh_command = (
+        f'ssh -p {int(host.port or 22)} '
+        f'-o StrictHostKeyChecking=no -i {private_key_file}'
+    )
+    return [
+        'rsync',
+        options,
+        '--protect-args',
+        '--progress',
+        '-h',
+        '-e',
+        ssh_command,
+        '--',
+        f'{task.src_dir}/',
+        f'{host.username}@{host.hostname}:{task.dst_dir}',
+    ]
 
 
 def _do_sync(rds, task, host):
@@ -144,10 +196,13 @@ def _do_sync(rds, task, host):
         fp.flush()
 
         flag = time.time()
-        options = '-azv --progress' if task.host_id else '-rzv --progress'
-        argument = f'{task.src_dir}/ {host.username}@{host.hostname}:{task.dst_dir}'
-        command = f'rsync {options} -h -e "ssh -p {host.port} -o StrictHostKeyChecking=no -i {fp.name}" {argument}'
-        task = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        command = _make_rsync_command(task, host, fp.name)
+        task = subprocess.Popen(
+            command,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
         message = b''
         while True:
             output = task.stdout.read(1)
