@@ -323,15 +323,6 @@ function Publish() {
               <strong className={S.removeDetailAppName}>{detail.app_name}</strong>
             </div>
           </div>
-          <div className={S.removeDetailNotice}>
-            <InfoCircleOutlined className={S.removeDetailNoticeIcon} />
-            <div>
-              <div className={S.removeDetailNoticeTitle}>仅移除此环境下的发布项</div>
-              <div className={S.removeDetailNoticeText}>
-                其他发布环境下的同名应用不受影响。仅允许移除未预传镜像且仍待发布的应用。
-              </div>
-            </div>
-          </div>
         </div>
       ),
       okText: '确认移除',
