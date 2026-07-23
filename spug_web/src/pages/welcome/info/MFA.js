@@ -5,7 +5,7 @@
  */
 import React, {useEffect, useState} from 'react';
 import {observer} from 'mobx-react';
-import {Alert, Button, Form, Input, Modal, Spin, Typography, message} from 'antd';
+import {Alert, Button, Form, Input, Modal, Space, Spin, Typography, message} from 'antd';
 import {http} from 'libs';
 import styles from './index.module.css';
 import store from './store';
@@ -16,8 +16,8 @@ export default observer(function MFA() {
   const [loading, setLoading] = useState(false);
   const [setup, setSetup] = useState();
   const [code, setCode] = useState();
-  const [unbindVisible, setUnbindVisible] = useState(false);
-  const [unbindCode, setUnbindCode] = useState();
+  const [action, setAction] = useState();
+  const [actionCode, setActionCode] = useState();
 
   useEffect(() => {
     setFetching(true);
@@ -42,25 +42,36 @@ export default observer(function MFA() {
       code,
       setup_token: setup.setup_token,
     }).then(() => {
-      message.success('身份认证器绑定成功');
+      message.success('MFA 已开启');
       setSetup(undefined);
       setCode(undefined);
       return store.fetchUser()
     }).finally(() => setLoading(false))
   }
 
-  function handleUnbind() {
-    if (!unbindCode || unbindCode.length !== 6) return message.error('请输入6位验证码');
+  function handleAction() {
+    if (!actionCode || actionCode.length !== 6) return message.error('请输入6位验证码');
     setLoading(true);
-    http.post('/api/account/mfa/', {action: 'unbind', code: unbindCode})
+    http.post('/api/account/mfa/', {action, code: actionCode})
       .then(() => {
-        message.success('身份认证器已解除绑定');
-        setUnbindVisible(false);
-        setUnbindCode(undefined);
+        const messages = {
+          enable: 'MFA 已开启',
+          disable: 'MFA 已关闭',
+          unbind: '身份认证器已解除绑定',
+        };
+        message.success(messages[action]);
+        setAction(undefined);
+        setActionCode(undefined);
         return store.fetchUser()
       })
       .finally(() => setLoading(false))
   }
+
+  const actionTitles = {
+    enable: '开启 MFA',
+    disable: '关闭 MFA',
+    unbind: '解除身份认证器绑定',
+  };
 
   return (
     <Spin spinning={fetching}>
@@ -69,12 +80,25 @@ export default observer(function MFA() {
         <Alert
           showIcon
           type="info"
-          message="使用 Google Authenticator 或其他兼容 TOTP 的应用生成登录验证码。"
+          message="MFA 由每个账号独立设置"
+          description="开启后，登录以及 Web 终端、执行命令、文件分发等敏感操作都需要使用身份认证器验证码。"
           style={{marginBottom: 24}}/>
         {store.user.mfa_bound ? (
           <React.Fragment>
-            <Alert showIcon type="success" message="当前账户已绑定身份认证器"/>
-            <Button danger style={{marginTop: 24}} onClick={() => setUnbindVisible(true)}>解除绑定</Button>
+            <Alert
+              showIcon
+              type={store.user.mfa_enabled ? 'success' : 'warning'}
+              message={store.user.mfa_enabled ?
+                '当前账户已开启 MFA' :
+                '当前账户 MFA 已关闭，身份认证器仍保持绑定'}/>
+            <Space style={{marginTop: 24}}>
+              {store.user.mfa_enabled ? (
+                <Button danger onClick={() => setAction('disable')}>关闭 MFA</Button>
+              ) : (
+                <Button type="primary" onClick={() => setAction('enable')}>开启 MFA</Button>
+              )}
+              <Button onClick={() => setAction('unbind')}>解除身份认证器绑定</Button>
+            </Space>
           </React.Fragment>
         ) : setup ? (
           <div style={{textAlign: 'center'}}>
@@ -97,34 +121,38 @@ export default observer(function MFA() {
             </div>
           </div>
         ) : (
-          <Button type="primary" loading={loading} onClick={handleCreateSetup}>绑定身份认证器</Button>
+          <Button type="primary" loading={loading} onClick={handleCreateSetup}>开启 MFA</Button>
         )}
       </div>
 
       <Modal
-        visible={unbindVisible}
-        title="解除身份认证器绑定"
-        okText="确认解除"
-        okButtonProps={{danger: true}}
+        visible={Boolean(action)}
+        title={actionTitles[action]}
+        okText="确认"
+        okButtonProps={{danger: action !== 'enable'}}
         confirmLoading={loading}
-        onOk={handleUnbind}
+        onOk={handleAction}
         onCancel={() => {
-          setUnbindVisible(false);
-          setUnbindCode(undefined)
+          setAction(undefined);
+          setActionCode(undefined)
         }}>
         <Alert
           showIcon
-          type="warning"
-          message="解除后，如果系统要求使用身份认证器，下次登录时需要重新绑定。"
+          type={action === 'enable' ? 'info' : 'warning'}
+          message={action === 'enable' ?
+            '开启后，下次登录和敏感操作将要求 MFA 验证。' :
+            action === 'disable' ?
+              '关闭后登录不再要求 MFA；Web 终端、执行命令和文件分发将不可使用。' :
+              '解除绑定会同时关闭 MFA，再次开启时需要重新扫描二维码。'}
           style={{marginBottom: 16}}/>
         <Form layout="vertical">
           <Form.Item required label="当前验证码">
             <Input
-              value={unbindCode}
+              value={actionCode}
               maxLength={6}
               autoComplete="off"
               placeholder="请输入身份认证器中的6位验证码"
-              onChange={e => setUnbindCode(e.target.value)}/>
+              onChange={e => setActionCode(e.target.value)}/>
           </Form.Item>
         </Form>
       </Modal>

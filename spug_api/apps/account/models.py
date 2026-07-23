@@ -22,6 +22,7 @@ class User(models.Model, ModelMixin):
     wx_token = models.CharField(max_length=50, null=True)
     mfa_secret = models.CharField(max_length=255, null=True)
     mfa_last_counter = models.BigIntegerField(null=True)
+    mfa_enabled = models.BooleanField(default=False)
     roles = models.ManyToManyField('Role', db_table='user_role_rel')
 
     created_at = models.CharField(max_length=20, default=human_datetime)

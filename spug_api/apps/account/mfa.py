@@ -122,7 +122,8 @@ def bind_totp(user, secret, code):
         return False
     user.mfa_secret = encrypt_totp_secret(secret)
     user.mfa_last_counter = counter
-    user.save(update_fields=('mfa_secret', 'mfa_last_counter'))
+    user.mfa_enabled = True
+    user.save(update_fields=('mfa_secret', 'mfa_last_counter', 'mfa_enabled'))
     return True
 
 
@@ -144,7 +145,21 @@ def verify_user_totp(user, code):
 def reset_user_totp(user):
     user.mfa_secret = None
     user.mfa_last_counter = None
-    user.save(update_fields=('mfa_secret', 'mfa_last_counter'))
+    user.mfa_enabled = False
+    user.save(update_fields=('mfa_secret', 'mfa_last_counter', 'mfa_enabled'))
+
+
+def set_user_mfa_enabled(user, enabled):
+    if enabled and not user.mfa_secret:
+        raise MFASecretError('当前账户未绑定身份认证器')
+    if enabled:
+        secret = decrypt_totp_secret(user.mfa_secret)
+        user.mfa_secret = encrypt_totp_secret(secret)
+    user.mfa_enabled = enabled
+    fields = ['mfa_enabled']
+    if enabled:
+        fields.append('mfa_secret')
+    user.save(update_fields=fields)
 
 
 def _failure_key(user):
@@ -175,13 +190,12 @@ def get_sensitive_scope(scope):
 
 
 def issue_sensitive_ticket(user, scope):
-    from apps.setting.utils import AppSetting
-
     config = get_sensitive_scope(scope)
     if not config:
         raise ValueError('不支持的敏感操作类型')
-    mfa = AppSetting.get_default('MFA', {'enable': False}) or {}
-    method = 'totp' if mfa.get('method') == 'totp' else 'push'
+    state_error = _user_mfa_state_error(user)
+    if state_error:
+        raise ValueError(state_error)
     ticket = secrets.token_urlsafe(32)
     cache.set(
         f'mfa:sensitive:ticket:{ticket}',
@@ -189,7 +203,7 @@ def issue_sensitive_ticket(user, scope):
             'user_id': user.id,
             'scope': scope,
             'reusable': config['reusable'],
-            'credential': _sensitive_credential_fingerprint(user, method),
+            'credential': _sensitive_credential_fingerprint(user),
         },
         config['ttl'],
     )
@@ -197,30 +211,27 @@ def issue_sensitive_ticket(user, scope):
 
 
 def authorize_sensitive_action(user, scope, action_token):
-    from apps.setting.utils import AppSetting
-
     config = get_sensitive_scope(scope)
     if not config:
         raise ValueError('不支持的敏感操作类型')
-    mfa = AppSetting.get_default('MFA', {'enable': False}) or {}
-    method = 'totp' if mfa.get('method') == 'totp' else 'push'
+    state_error = _user_mfa_state_error(user)
+    if state_error:
+        raise ValueError(state_error)
     cache.set(
         _sensitive_action_key(user, scope, action_token),
         {
             'user_id': user.id,
             'scope': scope,
-            'credential': _sensitive_credential_fingerprint(user, method),
+            'credential': _sensitive_credential_fingerprint(user),
         },
         config['ttl'],
     )
 
 
 def consume_sensitive_action_authorization(user, scope, action_token):
-    from apps.setting.utils import AppSetting
-
-    mfa = AppSetting.get_default('MFA', {'enable': False}) or {}
-    if not mfa.get('enable'):
-        return '系统未开启MFA认证，禁止使用该功能'
+    state_error = _user_mfa_state_error(user)
+    if state_error:
+        return state_error
     if not get_sensitive_scope(scope):
         return '不支持的敏感操作类型'
     if not action_token:
@@ -232,10 +243,9 @@ def consume_sensitive_action_authorization(user, scope, action_token):
         return 'MFA操作授权已被使用，请重新发起操作'
     try:
         payload = cache.get(key)
-        method = 'totp' if mfa.get('method') == 'totp' else 'push'
         if not payload or payload.get('user_id') != user.id \
                 or payload.get('scope') != scope \
-                or payload.get('credential') != _sensitive_credential_fingerprint(user, method):
+                or payload.get('credential') != _sensitive_credential_fingerprint(user):
             return 'MFA操作授权已失效或已被使用，请重新发起操作'
         cache.delete(key)
         return None
@@ -244,11 +254,9 @@ def consume_sensitive_action_authorization(user, scope, action_token):
 
 
 def validate_sensitive_ticket(user, scope, ticket):
-    from apps.setting.utils import AppSetting
-
-    mfa = AppSetting.get_default('MFA', {'enable': False}) or {}
-    if not mfa.get('enable'):
-        return '系统未开启MFA认证，禁止使用该功能'
+    state_error = _user_mfa_state_error(user)
+    if state_error:
+        return state_error
     config = get_sensitive_scope(scope)
     if not config:
         return '不支持的敏感操作类型'
@@ -256,10 +264,9 @@ def validate_sensitive_ticket(user, scope, ticket):
         return '本操作必须先通过MFA验证'
 
     key = f'mfa:sensitive:ticket:{ticket}'
-    method = 'totp' if mfa.get('method') == 'totp' else 'push'
     if config['reusable']:
         payload = cache.get(key)
-        if not _is_valid_sensitive_ticket(payload, user, scope, config, method):
+        if not _is_valid_sensitive_ticket(payload, user, scope, config):
             return 'MFA授权已失效，请重新验证'
         return None
 
@@ -268,7 +275,7 @@ def validate_sensitive_ticket(user, scope, ticket):
         return 'MFA授权已被使用，请重新验证'
     try:
         payload = cache.get(key)
-        if not _is_valid_sensitive_ticket(payload, user, scope, config, method):
+        if not _is_valid_sensitive_ticket(payload, user, scope, config):
             return 'MFA授权已失效或已被使用，请重新验证'
         cache.delete(key)
         return None
@@ -276,21 +283,28 @@ def validate_sensitive_ticket(user, scope, ticket):
         cache.delete(lock_key)
 
 
-def _is_valid_sensitive_ticket(payload, user, scope, config, method):
+def _is_valid_sensitive_ticket(payload, user, scope, config):
     return bool(
         payload
         and payload.get('user_id') == user.id
         and payload.get('scope') == scope
         and payload.get('reusable') == config['reusable']
-        and payload.get('credential') == _sensitive_credential_fingerprint(user, method)
+        and payload.get('credential') == _sensitive_credential_fingerprint(user)
     )
 
 
-def _sensitive_credential_fingerprint(user, method):
-    credential = user.mfa_secret if method == 'totp' else user.wx_token
-    value = f'{method}:{credential or ""}'.encode('utf-8')
+def _sensitive_credential_fingerprint(user):
+    value = f'totp:{user.mfa_secret or ""}'.encode('utf-8')
     return hashlib.sha256(value).hexdigest()
 
 
 def _sensitive_action_key(user, scope, action_token):
     return f'mfa:sensitive:action:{user.id}:{scope}:{action_token}'
+
+
+def _user_mfa_state_error(user):
+    if not user.mfa_enabled:
+        return '当前账户未开启MFA认证，禁止使用该功能'
+    if not user.mfa_bound:
+        return '当前账户未绑定身份认证器，请先在个人中心完成绑定'
+    return None

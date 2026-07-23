@@ -8,7 +8,6 @@ from apps.account.mfa import issue_sensitive_ticket
 from apps.account.models import User
 from apps.file.views import FileView
 from apps.host.models import Host
-from apps.setting.utils import AppSetting
 
 
 TEST_CACHES = {
@@ -56,10 +55,12 @@ class FileManagerMFAEnforcementTests(TestCase):
     def test_file_manager_is_denied_when_mfa_is_disabled(self):
         result = self.fetch_files('invalid-ticket')
 
-        self.assertIn('系统未开启MFA认证', result['error'])
+        self.assertIn('当前账户未开启MFA认证', result['error'])
 
     def test_file_manager_accepts_reusable_console_ticket(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        self.user.mfa_secret = 'test-mfa-secret'
+        self.user.mfa_enabled = True
+        self.user.save(update_fields=('mfa_secret', 'mfa_enabled'))
         ticket, _ = issue_sensitive_ticket(self.user, 'host_console')
 
         first = self.fetch_files(ticket)

@@ -2,7 +2,6 @@
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
 from django.core.management.base import BaseCommand
-from apps.setting.utils import AppSetting
 
 
 class Command(BaseCommand):
@@ -21,21 +20,14 @@ class Command(BaseCommand):
     def print_help(self, *args):
         message = '''
         系统设置命令用法：
-            set mfa disable     禁用登录MFA
+            MFA 已改为账号独立设置，请由账号在个人中心开启或关闭。
         '''
         self.stdout.write(message)
 
     def handle(self, *args, **options):
         target = options['target']
         if target == 'mfa':
-            if options['value'] != 'disable':
-                return self.echo_error(f'mfa设置，不支持的值【{options["value"]}】')
-            current = AppSetting.get_default('MFA', {'enable': False})
-            AppSetting.set('MFA', {
-                'enable': False,
-                'method': current.get('method', 'push'),
-            })
-            self.echo_success('MFA已禁用')
+            self.echo_error('MFA已改为账号独立设置，不能通过系统级命令修改')
         else:
             self.echo_error('未识别的操作')
             self.print_help()

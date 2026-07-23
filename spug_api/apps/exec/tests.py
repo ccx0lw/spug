@@ -18,7 +18,6 @@ from apps.exec.transfer import (
 )
 from apps.exec.views import TaskView
 from apps.host.models import Group, Host
-from apps.setting.utils import AppSetting
 
 
 TEST_CACHES = {
@@ -127,7 +126,9 @@ class TransferSourceHostAuthorizationTests(TestCase):
         self.role.save(update_fields=('group_perms',))
 
     def test_unauthorized_source_host_is_rejected_before_ssh(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        self.user.mfa_secret = 'test-mfa-secret'
+        self.user.mfa_enabled = True
+        self.user.save(update_fields=('mfa_secret', 'mfa_enabled'))
         ticket, _ = issue_sensitive_ticket(self.user, 'file_transfer')
         request = self.factory.post(
             '/exec/transfer/',
@@ -245,14 +246,19 @@ class TaskMFAEnforcementTests(TestCase):
             response = TransferView.as_view()(request)
         return json.loads(response.content.decode('utf-8')), thread
 
+    def enable_mfa(self):
+        self.user.mfa_secret = 'test-mfa-secret'
+        self.user.mfa_enabled = True
+        self.user.save(update_fields=('mfa_secret', 'mfa_enabled'))
+
     def test_command_execution_is_denied_when_mfa_is_disabled(self):
         result = self.execute('invalid-ticket')
 
-        self.assertIn('系统未开启MFA认证', result['error'])
+        self.assertIn('当前账户未开启MFA认证', result['error'])
         self.assertEqual(0, ExecHistory.objects.count())
 
     def test_command_execution_consumes_mfa_ticket_once(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        self.enable_mfa()
         ticket, _ = issue_sensitive_ticket(self.user, 'exec_task')
 
         first = self.execute(ticket)
@@ -264,7 +270,7 @@ class TaskMFAEnforcementTests(TestCase):
         self.assertEqual(1, ExecHistory.objects.count())
 
     def test_command_dispatch_consumes_bound_authorization_once(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        self.enable_mfa()
         ticket, _ = issue_sensitive_ticket(self.user, 'exec_task')
         created = self.execute(ticket)
 
@@ -278,11 +284,11 @@ class TaskMFAEnforcementTests(TestCase):
     def test_file_transfer_is_denied_when_mfa_is_disabled(self):
         result = self.transfer('invalid-ticket')
 
-        self.assertIn('系统未开启MFA认证', result['error'])
+        self.assertIn('当前账户未开启MFA认证', result['error'])
         self.assertEqual(0, Transfer.objects.count())
 
     def test_file_transfer_consumes_mfa_ticket_once(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        self.enable_mfa()
         ticket, _ = issue_sensitive_ticket(self.user, 'file_transfer')
 
         with tempfile.TemporaryDirectory() as transfer_dir:
@@ -296,7 +302,7 @@ class TaskMFAEnforcementTests(TestCase):
         self.assertEqual(1, Transfer.objects.count())
 
     def test_file_transfer_dispatch_consumes_bound_authorization_once(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        self.enable_mfa()
         ticket, _ = issue_sensitive_ticket(self.user, 'file_transfer')
 
         with tempfile.TemporaryDirectory() as transfer_dir:

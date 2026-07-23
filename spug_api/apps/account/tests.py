@@ -14,8 +14,7 @@ from apps.account.mfa import (
 from apps.account.models import User
 from apps.account.views import SensitiveMFAView, UserMFAView, UserView, login
 from libs.middleware import AuthenticationMiddleware
-from apps.setting.views import MFAView as SystemMFAView
-from apps.setting.utils import AppSetting
+from apps.setting.models import Setting
 
 
 TEST_CACHES = {
@@ -64,13 +63,19 @@ class TOTPLoginTests(TestCase):
         return json.loads(response.content.decode('utf-8'))
 
     def enable_totp(self):
-        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
-
-    def test_bound_user_logs_in_with_totp_and_code_cannot_be_replayed(self):
-        self.enable_totp()
         secret = pyotp.random_base32()
         self.user.mfa_secret = encrypt_totp_secret(secret)
-        self.user.save(update_fields=('mfa_secret',))
+        self.user.mfa_last_counter = None
+        self.user.mfa_enabled = True
+        self.user.save(update_fields=(
+            'mfa_secret',
+            'mfa_last_counter',
+            'mfa_enabled',
+        ))
+        return secret
+
+    def test_bound_user_logs_in_with_totp_and_code_cannot_be_replayed(self):
+        secret = self.enable_totp()
 
         challenge = self.request_login()
         self.assertFalse(challenge['error'])
@@ -86,59 +91,34 @@ class TOTPLoginTests(TestCase):
         replay = self.request_login(captcha=code)
         self.assertIn('验证码错误', replay['error'])
 
-    def test_unbound_user_must_complete_setup_before_token_is_issued(self):
-        self.enable_totp()
+    def test_disabled_account_logs_in_without_mfa(self):
+        secret = self.enable_totp()
+        self.user.mfa_enabled = False
+        self.user.save(update_fields=('mfa_enabled',))
+        result = self.request_login()
 
-        challenge = self.request_login()
-        data = challenge['data']
-        self.assertTrue(data['mfa_setup_required'])
-        self.assertTrue(data['qr_code'].startswith('data:image/svg+xml;base64,'))
-        self.assertNotIn('access_token', data)
-
-        code = pyotp.TOTP(data['secret']).now()
-        result = self.request_login(
-            captcha=code,
-            mfa_setup_token=data['setup_token'],
-        )
         self.assertFalse(result['error'])
         self.assertEqual(32, len(result['data']['access_token']))
-
-        self.user.refresh_from_db()
         self.assertTrue(self.user.mfa_bound)
-        self.assertNotEqual(data['secret'], self.user.mfa_secret)
-        self.assertEqual(data['secret'], decrypt_totp_secret(self.user.mfa_secret))
+        self.assertEqual(secret, decrypt_totp_secret(self.user.mfa_secret))
 
-    def test_expired_setup_token_is_rejected(self):
-        self.enable_totp()
-
-        challenge = self.request_login()['data']
-        cache.delete(f"mfa:setup:{challenge['setup_token']}")
-        result = self.request_login(
-            captcha=pyotp.TOTP(challenge['secret']).now(),
-            mfa_setup_token=challenge['setup_token'],
+    def test_legacy_global_setting_does_not_enable_account_mfa(self):
+        Setting.objects.create(
+            key='MFA',
+            value=json.dumps({'enable': True, 'method': 'totp'}),
         )
-
-        self.assertIn('绑定信息已失效', result['error'])
-        self.user.refresh_from_db()
-        self.assertFalse(self.user.mfa_bound)
-
-    @patch('apps.account.views.send_login_code')
-    def test_legacy_mfa_config_still_uses_push(self, send_login_code):
-        self.user.wx_token = 'contact-id'
-        self.user.save(update_fields=('wx_token',))
-        AppSetting.set('MFA', {'enable': True})
-        AppSetting.set('spug_push_key', 'push-service-key')
 
         result = self.request_login()
 
         self.assertFalse(result['error'])
-        self.assertEqual('push', result['data']['mfa_method'])
-        send_login_code.assert_called_once()
+        self.assertEqual(32, len(result['data']['access_token']))
+        self.assertNotIn('required_mfa', result['data'])
 
     def test_account_list_only_exposes_totp_binding_status(self):
         self.user.mfa_secret = encrypt_totp_secret(pyotp.random_base32())
         self.user.mfa_last_counter = 123
-        self.user.save(update_fields=('mfa_secret', 'mfa_last_counter'))
+        self.user.mfa_enabled = True
+        self.user.save(update_fields=('mfa_secret', 'mfa_last_counter', 'mfa_enabled'))
         request = self.factory.get('/account/user/')
         request.user = self.user
 
@@ -146,6 +126,7 @@ class TOTPLoginTests(TestCase):
         record = json.loads(response.content.decode('utf-8'))['data'][0]
 
         self.assertTrue(record['mfa_bound'])
+        self.assertTrue(record['mfa_enabled'])
         self.assertNotIn('mfa_secret', record)
         self.assertNotIn('mfa_last_counter', record)
         self.assertNotIn('mfa_secret', self.user.to_dict())
@@ -171,6 +152,7 @@ class TOTPLoginTests(TestCase):
 
         self.user.refresh_from_db()
         self.assertTrue(self.user.mfa_bound)
+        self.assertTrue(self.user.mfa_enabled)
         self.user.mfa_last_counter = None
         self.user.save(update_fields=('mfa_last_counter',))
         unbind_request = self.factory.post(
@@ -187,67 +169,49 @@ class TOTPLoginTests(TestCase):
         self.assertFalse(json.loads(unbind_response.content.decode('utf-8'))['error'])
         self.user.refresh_from_db()
         self.assertFalse(self.user.mfa_bound)
+        self.assertFalse(self.user.mfa_enabled)
 
-    def test_system_mfa_can_be_enabled_with_bound_admin_totp(self):
-        secret = pyotp.random_base32()
-        self.user.mfa_secret = encrypt_totp_secret(secret)
+    def test_user_can_disable_and_reenable_mfa_without_rebinding(self):
+        secret = self.enable_totp()
+        encrypted_secret = self.user.mfa_secret
         self.user.mfa_last_counter = None
-        self.user.save(update_fields=('mfa_secret', 'mfa_last_counter'))
-        request = self.factory.post(
-            '/setting/mfa/',
+        self.user.save(update_fields=('mfa_last_counter',))
+        disable_request = self.factory.post(
+            '/account/mfa/',
             data=json.dumps({
-                'enable': True,
-                'method': 'totp',
+                'action': 'disable',
                 'code': pyotp.TOTP(secret).now(),
             }),
             content_type='application/json',
         )
-        request.user = self.user
+        disable_request.user = self.user
+        disable_response = UserMFAView.as_view()(disable_request)
+        self.assertFalse(json.loads(disable_response.content.decode('utf-8'))['error'])
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.mfa_enabled)
+        self.assertTrue(self.user.mfa_bound)
+        self.assertEqual(encrypted_secret, self.user.mfa_secret)
 
-        response = SystemMFAView.as_view()(request)
-        payload = json.loads(response.content.decode('utf-8'))
-
-        self.assertFalse(payload['error'])
-        self.assertEqual(
-            {'enable': True, 'method': 'totp'},
-            AppSetting.get_default('MFA'),
-        )
-
-    def test_system_mfa_setup_displays_qr_and_enables_totp_for_unbound_admin(self):
-        setup_request = self.factory.get(
-            '/setting/mfa/',
-            data={'method': 'totp'},
-        )
-        setup_request.user = self.user
-        setup_response = SystemMFAView.as_view()(setup_request)
-        setup_payload = json.loads(setup_response.content.decode('utf-8'))
-        setup = setup_payload['data']
-
-        self.assertFalse(setup_payload['error'])
-        self.assertFalse(setup['mfa_bound'])
-        self.assertTrue(setup['qr_code'].startswith('data:image/svg+xml;base64,'))
-
+        self.user.mfa_last_counter = None
+        self.user.save(update_fields=('mfa_last_counter',))
         enable_request = self.factory.post(
-            '/setting/mfa/',
+            '/account/mfa/',
             data=json.dumps({
-                'enable': True,
-                'method': 'totp',
-                'code': pyotp.TOTP(setup['secret']).now(),
-                'setup_token': setup['setup_token'],
+                'action': 'enable',
+                'code': pyotp.TOTP(secret).now(),
             }),
             content_type='application/json',
         )
         enable_request.user = self.user
-        enable_response = SystemMFAView.as_view()(enable_request)
+        enable_response = UserMFAView.as_view()(enable_request)
         enable_payload = json.loads(enable_response.content.decode('utf-8'))
 
         self.assertFalse(enable_payload['error'])
         self.user.refresh_from_db()
+        self.assertTrue(self.user.mfa_enabled)
         self.assertTrue(self.user.mfa_bound)
-        self.assertEqual(
-            {'enable': True, 'method': 'totp'},
-            AppSetting.get_default('MFA'),
-        )
+        self.assertNotEqual(encrypted_secret, self.user.mfa_secret)
+        self.assertEqual(secret, decrypt_totp_secret(self.user.mfa_secret))
 
     def test_sensitive_operation_is_denied_when_mfa_is_disabled(self):
         request = self.factory.get(
@@ -259,14 +223,10 @@ class TOTPLoginTests(TestCase):
         response = SensitiveMFAView.as_view()(request)
         payload = json.loads(response.content.decode('utf-8'))
 
-        self.assertIn('系统未开启MFA认证', payload['error'])
+        self.assertIn('当前账户未开启MFA认证', payload['error'])
 
     def test_sensitive_totp_ticket_is_scoped_and_single_use(self):
-        self.enable_totp()
-        secret = pyotp.random_base32()
-        self.user.mfa_secret = encrypt_totp_secret(secret)
-        self.user.mfa_last_counter = None
-        self.user.save(update_fields=('mfa_secret', 'mfa_last_counter'))
+        secret = self.enable_totp()
         request = self.factory.post(
             '/account/mfa/sensitive/',
             data=json.dumps({
@@ -295,39 +255,6 @@ class TOTPLoginTests(TestCase):
         self.assertIsNone(validate_sensitive_ticket(self.user, 'host_console', ticket))
         self.assertIsNone(validate_sensitive_ticket(self.user, 'host_console', ticket))
         self.assertIsNotNone(validate_sensitive_ticket(self.user, 'exec_task', ticket))
-
-    @patch('apps.account.views.send_login_code')
-    def test_sensitive_operation_supports_push_mfa(self, send_login_code):
-        self.user.wx_token = 'contact-id'
-        self.user.save(update_fields=('wx_token',))
-        AppSetting.set('MFA', {'enable': True, 'method': 'push'})
-        AppSetting.set('spug_push_key', 'push-service-key')
-        prepare = self.factory.get(
-            '/account/mfa/sensitive/',
-            data={'scope': 'exec_task'},
-        )
-        prepare.user = self.user
-        prepare_response = SensitiveMFAView.as_view()(prepare)
-        prepare_payload = json.loads(prepare_response.content.decode('utf-8'))
-        code = send_login_code.call_args.args[2]
-
-        verify = self.factory.post(
-            '/account/mfa/sensitive/',
-            data=json.dumps({'scope': 'exec_task', 'code': code}),
-            content_type='application/json',
-        )
-        verify.user = self.user
-        verify_response = SensitiveMFAView.as_view()(verify)
-        verify_payload = json.loads(verify_response.content.decode('utf-8'))
-
-        self.assertEqual('push', prepare_payload['data']['method'])
-        self.assertFalse(verify_payload['error'])
-        self.assertIsNone(validate_sensitive_ticket(
-            self.user,
-            'exec_task',
-            verify_payload['data']['ticket'],
-        ))
-
 
 @override_settings(CACHES=TEST_CACHES)
 class DeletedUserSessionRevocationTests(TestCase):

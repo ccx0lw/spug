@@ -11,7 +11,6 @@ urlpatterns = [
     url(r'^user/$', UserSettingView.as_view()),
     url(r'^ldap_test/$', ldap_test),
     url(r'^email_test/$', email_test),
-    url(r'^mfa/$', MFAView.as_view()),
     url(r'^about/$', get_about),
     url(r'^push/bind/$', handle_push_bind),
     url(r'^push/balance/$', handle_push_balance),

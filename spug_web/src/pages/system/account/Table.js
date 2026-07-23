@@ -44,9 +44,12 @@ class ComTable extends React.Component {
     title: '状态',
     render: text => text['is_active'] ? <Badge status="success" text="正常"/> : <Badge status="default" text="禁用"/>
   }, {
-    title: '身份认证器',
-    dataIndex: 'mfa_bound',
-    render: value => value ? <Badge status="success" text="已绑定"/> : <Badge status="default" text="未绑定"/>
+    title: 'MFA',
+    render: info => info['mfa_enabled'] ?
+      <Badge status="success" text="已开启"/> :
+      info['mfa_bound'] ?
+        <Badge status="warning" text="已关闭（已绑定）"/> :
+        <Badge status="default" text="未配置"/>
   }, {
     title: '最近登录',
     dataIndex: 'last_login'
@@ -97,7 +100,7 @@ class ComTable extends React.Component {
     Modal.confirm({
       icon: <ExclamationCircleOutlined/>,
       title: '重置身份认证器',
-      content: `确定要解除【${info.nickname}】当前绑定的身份认证器？该账户下次登录时需要重新绑定。`,
+      content: `确定要解除【${info.nickname}】当前绑定的身份认证器并关闭该账户 MFA？`,
       onOk: () => {
         return http.patch('/api/account/user/', {id: info.id, reset_mfa: true})
           .then(() => {
