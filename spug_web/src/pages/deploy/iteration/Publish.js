@@ -19,7 +19,8 @@ import {
   SyncOutlined,
   CloudServerOutlined,
   EditOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import { AuthButton } from 'components';
 import { http } from 'libs';
@@ -305,22 +306,31 @@ function Publish() {
       title: '移除环境下的应用',
       icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
       content: (
-        <div>
-          <p>确认移除以下发布项：</p>
-          <div style={{ marginBottom: 16 }}>
-            <span style={{ color: '#8c8c8c' }}>发布环境：</span>
-            <Tag color={isProd ? 'error' : 'processing'} style={{ margin: '0 4px' }}>
-              {envName}
-            </Tag>
-            <span style={{ marginLeft: 12, color: '#8c8c8c' }}>应用：</span>
-            <strong>{detail.app_name}</strong>
+        <div className={S.removeDetailConfirm}>
+          <div className={S.removeDetailTarget}>
+            <div className={S.removeDetailTargetRow}>
+              <span className={S.removeDetailLabel}>发布环境</span>
+              <span>
+                <Tag color={isProd ? 'error' : 'processing'} className={S.removeDetailEnvTag}>
+                  {envName}
+                </Tag>
+                {isProd && <span className={S.removeDetailProdText}>生产环境</span>}
+              </span>
+            </div>
+            <div className={S.removeDetailTargetRow}>
+              <span className={S.removeDetailLabel}>应用</span>
+              <strong className={S.removeDetailAppName}>{detail.app_name}</strong>
+            </div>
           </div>
-          <Alert
-            showIcon
-            type="warning"
-            message="不会影响其他发布环境下的同名应用"
-            description="该操作仅适用于未预传镜像且仍待发布的应用。"
-          />
+          <div className={S.removeDetailNotice}>
+            <InfoCircleOutlined className={S.removeDetailNoticeIcon} />
+            <div>
+              <div className={S.removeDetailNoticeTitle}>仅移除此环境下的发布项</div>
+              <div className={S.removeDetailNoticeText}>
+                其他发布环境下的同名应用不受影响。仅允许移除未预传镜像且仍待发布的应用。
+              </div>
+            </div>
+          </div>
         </div>
       ),
       okText: '确认移除',

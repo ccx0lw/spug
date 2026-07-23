@@ -189,3 +189,79 @@
 .versionDangerRow > td:first-child {
   box-shadow: inset 3px 0 #ff4d4f;
 }
+
+.removeDetailConfirm {
+  padding-top: 4px;
+}
+
+.removeDetailTarget {
+  overflow: hidden;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.removeDetailTargetRow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+
+  & + & {
+    border-top: 1px solid #f0f0f0;
+  }
+}
+
+.removeDetailLabel {
+  color: #8c8c8c;
+  font-size: 13px;
+}
+
+.removeDetailEnvTag {
+  max-width: 220px;
+  margin-right: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.removeDetailProdText {
+  color: #ff4d4f;
+  font-size: 12px;
+}
+
+.removeDetailAppName {
+  overflow: hidden;
+  color: #262626;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeDetailNotice {
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  margin-top: 12px;
+  background: #fffbe6;
+  border-radius: 6px;
+}
+
+.removeDetailNoticeIcon {
+  margin-top: 3px;
+  color: #d48806;
+}
+
+.removeDetailNoticeTitle {
+  color: #614700;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.removeDetailNoticeText {
+  margin-top: 2px;
+  color: #8c6d1f;
+  font-size: 12px;
+  line-height: 18px;
+}
