@@ -32,6 +32,7 @@ from apps.deploy.views import (
 )
 from apps.host.models import Group, Host
 from apps.docker_image.models import DockerImage
+from apps.repository.models import Repository
 from apps.app.views import get_info as get_deploy_info
 from apps.app.views import get_versions as get_deploy_versions
 from apps.deploy.utils import (
@@ -41,6 +42,7 @@ from apps.deploy.utils import (
     get_iteration_detail_status,
     get_iteration_overall_status,
     get_deploy_retry_info,
+    get_reused_artifact_error,
     lock_deploy_and_get_running_request,
     reconcile_iteration_detail_statuses,
 )
@@ -906,6 +908,70 @@ class DeployRequestObjectScopeTests(TestCase):
             1,
             DeployRequest.objects.filter(deploy=self.denied_deploy).count(),
         )
+
+    def test_request_rejects_repository_that_did_not_build_successfully(self):
+        repository = Repository.objects.create(
+            app=self.allowed_app,
+            env=self.allowed_env,
+            deploy=self.allowed_deploy,
+            version='v1.0.0',
+            spug_version='failed-repository',
+            extra=json.dumps(['tag', 'v1.0.0']),
+            status='2',
+            created_by=self.creator,
+        )
+        request = self.factory.post(
+            '/api/deploy/request/ext1/',
+            data=json.dumps({
+                'deploy_id': self.allowed_deploy.id,
+                'name': '失败制品复用',
+                'extra': ['repository', repository.id],
+            }),
+            content_type='application/json',
+        )
+        request.user = self.scoped_user({'deploy.request.add'})
+
+        result = self.decode(post_request_ext1(request))
+
+        self.assertIn('未找到已成功的构建记录', result['error'])
+        self.assertFalse(DeployRequest.objects.filter(
+            name='失败制品复用'
+        ).exists())
+
+    def test_artifact_metadata_must_match_immutable_source(self):
+        image_deploy = self.make_deploy(
+            self.allowed_app,
+            self.allowed_env,
+        )
+        image_deploy.extend = '3'
+        image_deploy.save(update_fields=('extend',))
+        image = DockerImage.objects.create(
+            app=self.allowed_app,
+            env=self.allowed_env,
+            deploy=image_deploy,
+            version='v2.0.0',
+            spug_version='successful-image',
+            url='registry.example/app:v2.0.0',
+            extra=json.dumps(['tag', 'v2.0.0']),
+            status='5',
+            created_by=self.creator,
+        )
+        request_obj = DeployRequest.objects.create(
+            deploy=image_deploy,
+            docker_image=image,
+            name='镜像来源绑定',
+            type='1',
+            extra=json.dumps(['docker_image', 'tag', 'tampered']),
+            host_ids='[]',
+            status='1',
+            version=image.version,
+            spug_version=image.spug_version,
+            created_by=self.creator,
+        )
+
+        error = get_reused_artifact_error(request_obj)
+
+        self.assertIn('来源信息不一致', error)
 
 
 class DeployIterationObjectScopeTests(TestCase):

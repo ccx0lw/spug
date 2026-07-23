@@ -39,6 +39,56 @@ def scoped_deploy_requests(user):
     )
 
 
+def get_reused_artifact_error(req):
+    """Validate that a reused artifact is successful and bound to this request."""
+    try:
+        request_extra = json.loads(req.extra) if req.extra else []
+    except (TypeError, ValueError):
+        return '发布申请的制品来源信息无效'
+
+    artifacts = (
+        (
+            req.repository_id,
+            Repository,
+            'repository',
+            '代码构建产物',
+        ),
+        (
+            req.docker_image_id,
+            DockerImage,
+            'docker_image',
+            '容器镜像',
+        ),
+    )
+    for artifact_id, model, source_type, label in artifacts:
+        if not artifact_id:
+            continue
+        artifact = model.objects.filter(
+            pk=artifact_id,
+            deploy_id=req.deploy_id,
+            app_id=req.deploy.app_id,
+            env_id=req.deploy.env_id,
+            status='5',
+        ).first()
+        if not artifact:
+            return f'选择的{label}未构建成功或不属于当前发布配置'
+        try:
+            artifact_extra = json.loads(artifact.extra)
+        except (TypeError, ValueError):
+            return f'选择的{label}来源信息无效'
+
+        if artifact.remarks == 'SPUG AUTO MAKE':
+            expected_extra = artifact_extra
+        else:
+            expected_extra = [source_type] + artifact_extra
+        if (
+                request_extra != expected_extra
+                or req.version != artifact.version
+                or req.spug_version != artifact.spug_version):
+            return f'发布申请与选择的{label}来源信息不一致'
+    return ''
+
+
 def get_iteration_scope_error(user, iteration, details=None):
     if user.is_supper:
         return ''
@@ -374,6 +424,9 @@ def dispatch(req, fail_mode=False):
     helper = Helper.make(rds, rds_key, req.host_ids if fail_mode else None)
 
     try:
+        artifact_error = get_reused_artifact_error(req)
+        if artifact_error:
+            helper.send_error('local', artifact_error)
         api_token = uuid.uuid4().hex
         rds.setex(api_token, 60 * 60, f'{req.deploy.app_id},{req.deploy.env_id}')
         env = AttrDict(

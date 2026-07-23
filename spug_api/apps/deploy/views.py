@@ -27,6 +27,7 @@ from apps.deploy.utils import (
     get_iteration_overall_status,
     get_iteration_scope_error,
     get_deploy_execution_scope_error,
+    get_reused_artifact_error,
     get_cross_iteration_warnings,
     get_deploy_retry_error,
     get_deploy_retry_info,
@@ -310,6 +311,9 @@ class RequestDetailView(View):
         req = DeployRequest.objects.select_for_update().filter(**query).first()
         if not req:
             return json_response(error='未找到指定发布申请')
+        artifact_error = get_reused_artifact_error(req)
+        if artifact_error:
+            return json_response(error=artifact_error)
         if req.status not in ('1', '-3'):
             return json_response(error='该申请单当前状态还不能执行发布')
         is_retry = req.status == '-3'
@@ -464,9 +468,12 @@ def post_request_ext1(request):
             repository = Repository.objects.filter(
                 pk=form.extra[1],
                 deploy=deploy,
+                app_id=deploy.app_id,
+                env_id=deploy.env_id,
+                status='5',
             ).first()
             if not repository:
-                return json_response(error='未找到构建记录或无操作权限')
+                return json_response(error='未找到已成功的构建记录或无操作权限')
             form.repository_id = repository.id
             form.version = repository.version
             form.spug_version = repository.spug_version
@@ -525,6 +532,9 @@ def post_request_ext1_rollback(request):
         versions = list({x.spug_version: 1 for x in requests}.keys())
         if req.spug_version not in versions[:req.deploy.extend_obj.versions + 1]:
             return json_response(error='选择的版本超出了发布配置中设置的版本数量，无法快速回滚，可通过新建发布申请选择构建仓库里的该版本再次发布。')
+        artifact_error = get_reused_artifact_error(req)
+        if artifact_error:
+            return json_response(error=artifact_error)
 
         form.status = '0' if req.deploy.is_audit else '1'
         # form.host_ids = json.dumps(sorted(form.host_ids))
@@ -663,9 +673,12 @@ def post_request_ext3(request):
                 repository = Repository.objects.filter(
                     pk=form.extra[1],
                     deploy=deploy,
+                    app_id=deploy.app_id,
+                    env_id=deploy.env_id,
+                    status='5',
                 ).first()
                 if not repository:
-                    return json_response(error='未找到构建记录或无操作权限')
+                    return json_response(error='未找到已成功的构建记录或无操作权限')
                 form.repository_id = repository.id
                 form.version = repository.version
                 form.spug_version = repository.spug_version
@@ -676,9 +689,12 @@ def post_request_ext3(request):
                 dockerImage = DockerImage.objects.filter(
                     id=form.extra[1],
                     deploy=deploy,
+                    app_id=deploy.app_id,
+                    env_id=deploy.env_id,
+                    status='5',
                 ).first()
                 if not dockerImage:
-                    return json_response(error='未找到镜像记录或无操作权限')
+                    return json_response(error='未找到已成功的镜像记录或无操作权限')
                 form.docker_image_id = dockerImage.id
                 # form.repository_id = dockerImage.repository.id
                 form.version = dockerImage.version
