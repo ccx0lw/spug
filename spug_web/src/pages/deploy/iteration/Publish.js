@@ -306,18 +306,20 @@ function Publish() {
       icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
       content: (
         <div>
-          <p>
-            确认从发布环境
+          <p>确认移除以下发布项：</p>
+          <div style={{ marginBottom: 16 }}>
+            <span style={{ color: '#8c8c8c' }}>发布环境：</span>
             <Tag color={isProd ? 'error' : 'processing'} style={{ margin: '0 4px' }}>
               {envName}
             </Tag>
-            中移除应用【{detail.app_name}】？
-          </p>
+            <span style={{ marginLeft: 12, color: '#8c8c8c' }}>应用：</span>
+            <strong>{detail.app_name}</strong>
+          </div>
           <Alert
             showIcon
             type="warning"
-            message={`只移除【${envName}】环境下的该应用`}
-            description="不会影响迭代中其他发布环境下的同名应用。该操作仅适用于未预传镜像且仍待发布的应用。"
+            message="不会影响其他发布环境下的同名应用"
+            description="该操作仅适用于未预传镜像且仍待发布的应用。"
           />
         </div>
       ),
