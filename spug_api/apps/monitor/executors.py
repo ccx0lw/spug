@@ -15,6 +15,7 @@ import re
 
 logging.captureWarnings(True)
 regex = re.compile(r'Failed to establish a new connection: (.*)\'\)+')
+PING_TARGET_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$')
 
 
 def site_check(url, limit):
@@ -46,11 +47,18 @@ def port_check(addr, port):
 
 def ping_check(addr):
     try:
+        if not isinstance(addr, str) or not PING_TARGET_RE.fullmatch(addr):
+            return False, 'Ping地址格式错误'
         if platform.system().lower() == 'windows':
-            command = f'ping -n 1 -w 3000 {addr}'
+            command = ['ping', '-n', '1', '-w', '3000', addr]
         else:
-            command = f'ping -c 1 -W 3 {addr}'
-        task = subprocess.run(command, shell=True, stdout=subprocess.PIPE)
+            command = ['ping', '-c', '1', '-W', '3', addr]
+        task = subprocess.run(
+            command,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
         if task.returncode == 0:
             return True, 'Ping检测正常'
         else:
