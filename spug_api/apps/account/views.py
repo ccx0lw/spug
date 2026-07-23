@@ -26,12 +26,59 @@ from apps.setting.utils import AppSetting
 from apps.account.utils import verify_password
 from libs.ldap import LDAP
 from functools import partial
+import hashlib
 import user_agents
 import ipaddress
 import time
 import uuid
 import json
 import secrets
+
+
+LOGIN_FAILURE_TTL = 300
+LOGIN_PAIR_FAILURE_LIMIT = 5
+LOGIN_IP_FAILURE_LIMIT = 30
+
+
+def _login_failure_keys(request, username, login_type):
+    source_ip = get_request_real_ip(request.headers) or 'unknown'
+    pair = f'{login_type or ""}\0{username}\0{source_ip}'.encode('utf-8')
+    ip_value = source_ip.encode('utf-8')
+    return (
+        f'login:fail:pair:{hashlib.sha256(pair).hexdigest()}',
+        f'login:fail:ip:{hashlib.sha256(ip_value).hexdigest()}',
+    )
+
+
+def _login_attempt_locked(request, username, login_type):
+    pair_key, ip_key = _login_failure_keys(
+        request,
+        username,
+        login_type,
+    )
+    return (
+        int(cache.get(pair_key, 0)) >= LOGIN_PAIR_FAILURE_LIMIT
+        or int(cache.get(ip_key, 0)) >= LOGIN_IP_FAILURE_LIMIT
+    )
+
+
+def _increment_login_failure(key):
+    if cache.add(key, 1, LOGIN_FAILURE_TTL):
+        return
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, LOGIN_FAILURE_TTL)
+
+
+def _register_login_failure(request, username, login_type):
+    for key in _login_failure_keys(request, username, login_type):
+        _increment_login_failure(key)
+
+
+def _clear_login_failures(request, username, login_type):
+    pair_key, _ = _login_failure_keys(request, username, login_type)
+    cache.delete(pair_key)
 
 
 class UserView(AdminView):
@@ -348,6 +395,13 @@ def login(request):
         user = User.objects.filter(username=form.username, type=form.type).first()
         if user and not user.is_active:
             return handle_response(error="账户已被系统禁用")
+        if _login_attempt_locked(
+                request,
+                form.username,
+                form.type):
+            return handle_response(
+                error='登录失败次数过多，请5分钟后重试'
+            )
         if form.type == 'ldap':
             config = AppSetting.get_default('ldap_service')
             if not config:
@@ -369,14 +423,8 @@ def login(request):
                         handle_response, request, user, form.captcha, form.mfa_setup_token
                     )
 
-        value = cache.get_or_set(form.username, 0, 86400)
-        if value >= 3:
-            if user and user.is_active:
-                user.is_active = False
-                user.save()
-            return handle_response(error='账户已被系统禁用')
-        cache.set(form.username, value + 1, 86400)
-        return handle_response(error="用户名或密码错误，连续多次错误账户将会被禁用")
+        _register_login_failure(request, form.username, form.type)
+        return handle_response(error="用户名或密码错误")
     return json_response(error=error)
 
 
@@ -396,7 +444,7 @@ def handle_login_record(request, username, login_type, error=None):
 
 
 def handle_user_info(handle_response, request, user, captcha, mfa_setup_token=None):
-    cache.delete(user.username)
+    _clear_login_failures(request, user.username, user.type)
     mfa = AppSetting.get_default('MFA', {'enable': False})
     if mfa.get('enable'):
         method = mfa.get('method', 'push')

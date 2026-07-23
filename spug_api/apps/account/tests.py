@@ -395,3 +395,55 @@ class DeletedUserSessionRevocationTests(TestCase):
 
         self.assertEqual(401, response.status_code)
         self.assertFalse(hasattr(request, 'user'))
+
+
+@override_settings(CACHES=TEST_CACHES)
+class LoginFailureThrottlingTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.factory = RequestFactory()
+        self.user = User.objects.create(
+            username='throttle-user',
+            nickname='登录限流用户',
+            password_hash=User.make_password('Password123'),
+            access_token='',
+            token_expired=0,
+            last_login='',
+            last_ip='',
+        )
+
+    def request_login(self, password, source_ip='10.0.0.1'):
+        request = self.factory.post(
+            '/account/login/',
+            data=json.dumps({
+                'username': self.user.username,
+                'password': password,
+                'type': 'default',
+            }),
+            content_type='application/json',
+            HTTP_USER_AGENT='Spug Login Throttle Test',
+            HTTP_X_REAL_IP=source_ip,
+        )
+        return json.loads(login(request).content.decode('utf-8'))
+
+    def test_repeated_failures_temporarily_throttle_without_disabling_user(self):
+        for _ in range(5):
+            result = self.request_login('WrongPassword')
+            self.assertEqual('用户名或密码错误', result['error'])
+
+        result = self.request_login('WrongPassword')
+
+        self.assertEqual('登录失败次数过多，请5分钟后重试', result['error'])
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_active)
+
+    def test_throttled_source_does_not_lock_valid_login_from_another_ip(self):
+        for _ in range(5):
+            self.request_login('WrongPassword', source_ip='10.0.0.1')
+
+        blocked = self.request_login('Password123', source_ip='10.0.0.1')
+        allowed = self.request_login('Password123', source_ip='10.0.0.2')
+
+        self.assertEqual('登录失败次数过多，请5分钟后重试', blocked['error'])
+        self.assertFalse(allowed['error'])
+        self.assertEqual(32, len(allowed['data']['access_token']))
