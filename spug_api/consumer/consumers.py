@@ -4,6 +4,9 @@
 from django.conf import settings
 from django_redis import get_redis_connection
 from asgiref.sync import async_to_sync
+from apps.deploy.models import DeployRequest
+from apps.repository.models import Repository
+from apps.docker_image.models import DockerImage
 from apps.host.models import Host
 from consumer.utils import BaseConsumer
 from apps.account.utils import has_host_perm
@@ -12,6 +15,45 @@ from libs.utils import str_decode
 from threading import Thread
 import time
 import json
+
+
+def can_read_com_log(user, module, token):
+    model_config = {
+        'request': (
+            'deploy.request.view',
+            DeployRequest,
+        ),
+        'build': (
+            'deploy.repository.view',
+            Repository,
+        ),
+        'build_image': (
+            'deploy.docker_image.view',
+            DockerImage,
+        ),
+    }
+    if module == 'host':
+        return bool(user.has_perms(['host.host.add']))
+    if module not in model_config:
+        return False
+
+    permission, model = model_config[module]
+    if not user.has_perms([permission]):
+        return False
+    if module == 'request':
+        if not token.isdigit():
+            return False
+        queryset = model.objects.filter(pk=int(token))
+    else:
+        queryset = model.objects.filter(spug_version=token)
+    if user.is_supper:
+        return queryset.exists()
+
+    perms = user.deploy_perms
+    return queryset.filter(
+        deploy__app_id__in=perms['apps'],
+        deploy__env_id__in=perms['envs'],
+    ).exists()
 
 
 class ComConsumer(BaseConsumer):
@@ -30,6 +72,14 @@ class ComConsumer(BaseConsumer):
         else:
             raise TypeError(f'unknown module for {module}')
         self.rds = get_redis_connection()
+
+    def init(self):
+        token = self.scope['url_route']['kwargs']['token']
+        module = self.scope['url_route']['kwargs']['module']
+        if not can_read_com_log(self.user, module, token):
+            return self.close_with_message(
+                '未找到指定日志对象或无查看权限。'
+            )
 
     def disconnect(self, code):
         self.rds.close()
