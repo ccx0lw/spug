@@ -4,6 +4,8 @@
 from django_redis import get_redis_connection
 from apps.host.models import Host
 from apps.monitor.utils import handle_notify
+from apps.monitor.models import Detection
+from apps.monitor.utils import detection_targets_allowed
 from socket import socket
 import subprocess
 import platform
@@ -80,9 +82,20 @@ def host_executor(host, command):
 
 
 def monitor_worker_handler(job):
-    task_id, tp, addr, extra, threshold, quiet = json.loads(job)
+    payload = json.loads(job)
+    task_id, addr = payload[:2]
+    task = Detection.objects.select_related(
+        'created_by', 'updated_by'
+    ).filter(pk=task_id, is_active=True).first()
+    if not task:
+        return
+    targets = {str(x) for x in json.loads(task.targets)}
+    tp, extra = task.type, task.extra
+    threshold, quiet = task.threshold, task.quiet
     target = addr
-    if tp == '1':
+    if str(addr) not in targets or not detection_targets_allowed(task):
+        is_ok, message = False, '监控目标无权限或已失效'
+    elif tp == '1':
         is_ok, message = site_check(addr, extra)
     elif tp == '2':
         is_ok, message = port_check(addr, extra)

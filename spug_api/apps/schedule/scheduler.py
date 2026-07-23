@@ -11,6 +11,7 @@ from django.db import connections
 from django.db.utils import DatabaseError
 from apps.schedule.models import Task, History
 from apps.schedule.builtin import auto_run_by_day, auto_run_by_minute
+from apps.schedule.utils import task_targets_allowed
 from django.conf import settings
 from libs import AttrDict, human_datetime
 import logging
@@ -62,7 +63,14 @@ class Scheduler:
         self.scheduler.add_job(auto_run_by_day, 'cron', hour=1, minute=20)
         self.scheduler.add_job(auto_run_by_minute, 'interval', minutes=1)
 
-    def _dispatch(self, task_id, interpreter, command, targets):
+    def _dispatch(self, task_id):
+        task = Task.objects.select_related(
+            'created_by', 'updated_by'
+        ).filter(pk=task_id, is_active=True).first()
+        if not task or not task_targets_allowed(task):
+            connections.close_all()
+            return
+        targets = json.loads(task.targets)
         output = {x: None for x in targets}
         history = History.objects.create(
             task_id=task_id,
@@ -73,7 +81,7 @@ class Scheduler:
         Task.objects.filter(pk=task_id).update(latest_id=history.id)
         rds_cli = get_redis_connection()
         for t in targets:
-            rds_cli.rpush(SCHEDULE_WORKER_KEY, json.dumps([history.id, t, interpreter, command]))
+            rds_cli.rpush(SCHEDULE_WORKER_KEY, json.dumps([history.id, t]))
         connections.close_all()
 
     def _init(self):
@@ -86,7 +94,7 @@ class Scheduler:
                     self._dispatch,
                     trigger,
                     id=str(task.id),
-                    args=(task.id, task.interpreter, task.command, json.loads(task.targets)),
+                    args=(task.id,),
                 )
             connections.close_all()
         except DatabaseError:
@@ -106,7 +114,7 @@ class Scheduler:
                     self._dispatch,
                     trigger,
                     id=str(task.id),
-                    args=(task.id, task.interpreter, task.command, task.targets),
+                    args=(task.id,),
                     replace_existing=True
                 )
             elif task.action == 'remove':

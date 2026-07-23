@@ -2,6 +2,7 @@
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
 from django.db import close_old_connections
+from apps.account.utils import has_host_perm
 from apps.alarm.models import Alarm
 from apps.monitor.models import Detection
 from libs.spug import Notification
@@ -41,3 +42,20 @@ def handle_notify(task_id, target, is_ok, out, fault_times):
     grp = json.loads(det.notify_grp)
     notify = Notification(grp, event, target, det.name, out, duration)
     notify.dispatch_monitor(json.loads(det.notify_mode))
+
+
+def get_detection_actor(detection):
+    return detection.updated_by or detection.created_by
+
+
+def detection_targets_allowed(detection, user=None):
+    if detection.type not in ('3', '4'):
+        return True
+    actor = user or get_detection_actor(detection)
+    if not actor or not actor.is_active:
+        return False
+    try:
+        targets = json.loads(detection.targets)
+    except (TypeError, ValueError):
+        return False
+    return has_host_perm(actor, targets)

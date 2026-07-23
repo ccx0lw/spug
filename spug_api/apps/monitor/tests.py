@@ -1,8 +1,11 @@
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
 
 from apps.monitor.executors import ping_check
+from apps.monitor.views import run_test
 
 
 class PingTargetSecurityTests(SimpleTestCase):
@@ -23,3 +26,29 @@ class PingTargetSecurityTests(SimpleTestCase):
 
         self.assertEqual((False, 'Ping地址格式错误'), result)
         run.assert_not_called()
+
+
+class MonitorHostScopeTests(SimpleTestCase):
+    @patch('apps.monitor.views.dispatch')
+    def test_out_of_scope_command_monitor_is_rejected_before_ssh(
+            self, dispatch):
+        request = RequestFactory().post(
+            '/api/monitor/test/',
+            data=json.dumps({
+                'type': '4',
+                'targets': [999],
+                'extra': 'id',
+            }),
+            content_type='application/json',
+        )
+        request.user = SimpleNamespace(
+            is_supper=False,
+            group_perms=[],
+            has_perms=lambda codes: True,
+        )
+
+        response = run_test(request)
+        result = json.loads(response.content.decode('utf-8'))
+
+        self.assertEqual('无权访问目标主机', result['error'])
+        dispatch.assert_not_called()

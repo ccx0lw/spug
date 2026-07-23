@@ -8,6 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apps.schedule.scheduler import Scheduler
 from apps.schedule.models import Task, History
 from apps.schedule.executors import dispatch_job
+from apps.account.utils import has_host_perm
 from apps.host.models import Host
 from django.conf import settings
 from libs import json_response, JsonParser, Argument, human_datetime, auth
@@ -36,6 +37,8 @@ class Schedule(View):
             Argument('desc', required=False),
         ).parse(request.body)
         if error is None:
+            if not has_host_perm(request.user, form.targets):
+                return json_response(error='无权访问目标主机')
             form.targets = json.dumps(form.targets)
             form.rst_notify = json.dumps(form.rst_notify)
             if form.trigger == 'cron':
@@ -73,6 +76,9 @@ class Schedule(View):
         if error is None:
             task = Task.objects.get(pk=form.id)
             if form.get('is_active') is not None:
+                if form.is_active and not has_host_perm(
+                        request.user, json.loads(task.targets)):
+                    return json_response(error='无权访问目标主机')
                 task.is_active = form.is_active
                 task.latest_id = None
                 if form.is_active:
@@ -119,6 +125,8 @@ class HistoryView(View):
         task = Task.objects.filter(pk=t_id).first()
         if not task:
             return json_response(error='未找到指定任务')
+        if not has_host_perm(request.user, json.loads(task.targets)):
+            return json_response(error='无权访问目标主机')
         outputs, status = {}, 1
         for host_id in json.loads(task.targets):
             code, duration, out = dispatch_job(host_id, task.interpreter, task.command)

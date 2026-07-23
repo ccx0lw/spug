@@ -18,8 +18,15 @@ def has_host_perm(user, target):
         return True
     host_ids = get_host_perms(user)
     if isinstance(target, (list, set, tuple)):
-        return set(target).issubset(host_ids)
-    return int(target) in host_ids
+        try:
+            target_ids = {int(x) for x in target}
+        except (TypeError, ValueError):
+            return False
+        return target_ids.issubset(host_ids)
+    try:
+        return int(target) in host_ids
+    except (TypeError, ValueError):
+        return False
 
 
 def verify_password(password):

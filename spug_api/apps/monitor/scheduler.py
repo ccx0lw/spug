@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db import connections
 from django.db.utils import DatabaseError
 from apps.monitor.models import Detection
+from apps.monitor.utils import detection_targets_allowed
 from libs import AttrDict, human_datetime
 from datetime import datetime, timedelta
 from random import randint
@@ -24,11 +25,22 @@ class Scheduler:
     def __init__(self):
         self.scheduler = BackgroundScheduler(timezone=self.timezone, executors={'default': ThreadPoolExecutor(30)})
 
-    def _dispatch(self, task_id, tp, targets, extra, threshold, quiet):
-        Detection.objects.filter(pk=task_id).update(latest_run_time=human_datetime())
+    def _dispatch(self, task_id):
+        task = Detection.objects.select_related(
+            'created_by', 'updated_by'
+        ).filter(pk=task_id, is_active=True).first()
+        if not task or not detection_targets_allowed(task):
+            connections.close_all()
+            return
+        Detection.objects.filter(pk=task_id).update(
+            latest_run_time=human_datetime()
+        )
         rds_cli = get_redis_connection()
-        for t in json.loads(targets):
-            rds_cli.rpush(MONITOR_WORKER_KEY, json.dumps([task_id, tp, t, extra, threshold, quiet]))
+        for target in json.loads(task.targets):
+            rds_cli.rpush(
+                MONITOR_WORKER_KEY,
+                json.dumps([task_id, target]),
+            )
         connections.close_all()
 
     def _init(self):
@@ -41,7 +53,7 @@ class Scheduler:
                     self._dispatch,
                     trigger,
                     id=str(item.id),
-                    args=(item.id, item.type, item.targets, item.extra, item.threshold, item.quiet),
+                    args=(item.id,),
                     next_run_time=now + timedelta(seconds=randint(0, 60))
                 )
             connections.close_all()
@@ -62,7 +74,7 @@ class Scheduler:
                     self._dispatch,
                     trigger,
                     id=str(task.id),
-                    args=(task.id, task.type, task.targets, task.extra, task.threshold, task.quiet),
+                    args=(task.id,),
                     replace_existing=True
                 )
             elif task.action == 'remove':

@@ -5,6 +5,7 @@ from libs.ssh import AuthenticationException
 from django.db import close_old_connections, transaction
 from apps.host.models import Host
 from apps.schedule.models import History, Task
+from apps.schedule.utils import task_targets_allowed
 from apps.schedule.utils import send_fail_notify
 import subprocess
 import socket
@@ -53,8 +54,27 @@ def dispatch_job(host_id, interpreter, command):
 
 
 def schedule_worker_handler(job):
-    history_id, host_id, interpreter, command = json.loads(job)
-    code, duration, out = dispatch_job(host_id, interpreter, command)
+    payload = json.loads(job)
+    history_id, host_id = payload[:2]
+    history = History.objects.filter(pk=history_id).first()
+    if not history:
+        close_old_connections()
+        return
+    task = Task.objects.select_related(
+        'created_by', 'updated_by'
+    ).filter(pk=history.task_id).first()
+    if (
+        not history
+        or not task
+        or not task.is_active
+        or not task_targets_allowed(task)
+        or str(host_id) not in {str(x) for x in json.loads(task.targets)}
+    ):
+        code, duration, out = 1, 0, 'target host permission denied'
+    else:
+        code, duration, out = dispatch_job(
+            host_id, task.interpreter, task.command
+        )
 
     close_old_connections()
     with transaction.atomic():

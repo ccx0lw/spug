@@ -5,6 +5,7 @@ from libs.utils import human_datetime
 from libs.spug import Notification
 from libs.push import push_server
 from apps.setting.utils import AppSetting
+from apps.account.utils import has_host_perm
 import json
 
 
@@ -95,4 +96,21 @@ def _do_notify(task, mode, url, msg):
                 'message': msg or '请在任务计划执行历史中查看详情',
             }
         }
-        Notification.handle_request(f'{push_server}/spug/message/', data, 'spug')
+        Notification.handle_request(
+            f'{push_server}/spug/message/', data, 'spug'
+        )
+
+
+def get_task_actor(task):
+    return task.updated_by or task.created_by
+
+
+def task_targets_allowed(task, user=None):
+    actor = user or get_task_actor(task)
+    if not actor or not actor.is_active:
+        return False
+    try:
+        targets = json.loads(task.targets)
+    except (TypeError, ValueError):
+        return False
+    return has_host_perm(actor, targets)
