@@ -15,6 +15,8 @@ import moment, { max } from 'moment';
 import hostStore from 'pages/host/store';
 import tagStore from 'pages/config/tag/store';
 
+const SOURCE_TYPES = ['branch', 'tag', 'repository'];
+
 function NoVersions() {
   return (
     <div>
@@ -62,13 +64,13 @@ export default observer(function () {
 
     Promise.all([p1, p2, p3, hostStore.initial()])
       .then(([res1, res2, res3]) => {
-        if (!versions.branches) _initial(res1, res2, res3)
-        setVersions(res1)
-        setEnv(res3)
         var tmp = res2
         if (res3?.env_prod) {
           tmp = res2.filter(item => item?.extra?.length > 0 && item?.extra[0] == 'tag')
         }
+        if (!versions.branches) _initial(res1, tmp, res3)
+        setVersions(res1)
+        setEnv(res3)
         setRepositories(tmp)
       })
       .finally(() => setFetching(false))
@@ -77,6 +79,15 @@ export default observer(function () {
   function handleSubmit() {
     if (host_ids.length === 0) {
       return message.error('请至少选择一个要发布的主机')
+    }
+    if (!SOURCE_TYPES.includes(git_type)) {
+      return message.error('请选择发布来源类型')
+    }
+    if (extra1 === undefined || extra1 === null || extra1 === '') {
+      return message.error('请选择要发布的分支、标签或版本')
+    }
+    if (git_type === 'branch' && !extra2) {
+      return message.error('请选择要发布的 Commit ID')
     }
     setLoading(true);
     const formData = form.getFieldsValue();
@@ -95,10 +106,12 @@ export default observer(function () {
   }
 
   function _setDefault(type, new_extra, new_versions, new_repositories) {
-    const now_extra = new_extra || extra;
+    const now_extra = Array.isArray(new_extra) ? new_extra : extra;
     const now_versions = new_versions || versions;
     const now_repositories = new_repositories || repositories;
-    const {branches, tags} = now_versions;
+    const branches = now_versions.branches || {};
+    const tags = now_versions.tags || {};
+    setGitType(type);
     if (type === 'branch') {
       let [branch, commit] = [now_extra[1], null];
       if (branches[branch]) {
@@ -120,29 +133,25 @@ export default observer(function () {
 
   function _initial(versions, repositories, env) {
     if (env.env_prod) {
-      return _setDefault('tags', null, null, null)
+      return _setDefault('tag', [], versions, repositories)
     }
 
     const {branches, tags} = versions;
     if (branches && tags) {
       for (let item of store.records) {
-        if (item.extra && item.deploy_id === store.record.deploy_id) {
+        if (Array.isArray(item.extra) &&
+          SOURCE_TYPES.includes(item.extra[0]) &&
+          item.deploy_id === store.record.deploy_id) {
           const type = item.extra[0];
           setExtra(item.extra);
-          setGitType(type);
           return _setDefault(type, item.extra, versions, repositories);
         }
       }
-      setGitType('branch');
-      const branch = lds.get(Object.keys(branches), 0);
-      const commit = lds.get(branches, [branch, 0, 'id'])
-      setExtra1(branch);
-      setExtra2(commit)
+      _setDefault('branch', [], versions, repositories)
     }
   }
 
   function switchType(v) {
-    setGitType(v);
     _setDefault(v)
   }
 
@@ -193,7 +202,8 @@ export default observer(function () {
                 showSearch
                 style={{width: 350}}
                 value={extra1}
-                placeholder="请稍等"
+                disabled={!git_type}
+                placeholder={git_type ? '请选择' : '请先选择来源类型'}
                 onChange={switchExtra1}
                 notFoundContent={git_type === 'repository' ? <NoVersions/> : undefined}
                 filterOption={(input, option) => includes(option.content, input)}>
