@@ -643,8 +643,8 @@ function Publish() {
       title: '版本提示',
       dataIndex: 'cross_iteration_warning',
       width: 160,
-      render: (warning) => {
-        if (!warning || !warning.has_warning) {
+      render: (warning, detail) => {
+        if (detail.status === '2' || !warning || !warning.has_warning) {
           return <span style={{ color: '#bfbfbf' }}>-</span>;
         }
         return (
@@ -836,7 +836,9 @@ function Publish() {
           removableDetails.length >= iterationDetailCount
         );
         const warningDetails = (details || []).filter(detail => (
-          detail.cross_iteration_warning && detail.cross_iteration_warning.has_warning
+          detail.status !== '2'
+          && detail.cross_iteration_warning
+          && detail.cross_iteration_warning.has_warning
         ));
         const hasDangerWarning = warningDetails.some(
           detail => detail.cross_iteration_warning.level === 'danger'

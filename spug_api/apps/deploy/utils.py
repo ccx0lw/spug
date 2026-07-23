@@ -329,6 +329,19 @@ def get_cross_iteration_warnings(iteration, details):
         label = ''
         latest_success = None
 
+        # 已发布成功的明细是历史结果，不再提示版本回滚或跨迭代风险。
+        if detail.status == '2':
+            result[detail.id] = {
+                'has_warning': False,
+                'level': level,
+                'kind': kind,
+                'label': label,
+                'message': '',
+                'latest_success': latest_success,
+                'related_iterations': [],
+            }
+            continue
+
         latest_req = latest_request_by_deploy.get(detail.deploy_id)
         latest_detail = latest_detail_by_request.get(latest_req.id) if latest_req else None
         # 当前明细自己的成功记录不属于跨迭代提示。

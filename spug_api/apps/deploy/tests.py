@@ -494,6 +494,26 @@ class CrossIterationWarningTests(TestCase):
         self.assertIn('高于待发布版本 v1.0.2', warning['message'])
         self.assertIn('继续发布将执行版本回滚', warning['message'])
 
+    def test_published_detail_does_not_show_rollback_warning(self):
+        published_detail = self.create_detail(
+            self.iteration,
+            'v1.0.2',
+            status='2',
+        )
+        self.create_success_request(
+            'v1.0.3',
+            name='后续单应用指定 Tag 发布',
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [published_detail],
+        )[published_detail.id]
+
+        self.assertFalse(warning['has_warning'])
+        self.assertEqual('none', warning['kind'])
+        self.assertEqual('', warning['message'])
+
     def test_other_pending_iteration_is_included_in_warning(self):
         current_detail = self.create_detail(self.iteration, 'v1.0.0')
         other_iteration = DeployIteration.objects.create(
