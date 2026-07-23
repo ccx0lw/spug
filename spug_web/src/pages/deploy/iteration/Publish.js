@@ -628,7 +628,7 @@ function Publish() {
     {
       title: '操作',
       dataIndex: 'request_id',
-      width: 160,
+      width: 110,
       render: (requestId, detail) => {
         const canRemove = detail.status === '0'
           && detail.image_status === '0'
@@ -649,21 +649,23 @@ function Publish() {
                   auth="deploy.docker_image.view"
                   type="link"
                   size="small"
+                  aria-label="查看镜像日志"
                   icon={<FileTextOutlined />}
-                  onClick={() => showImageLog(detail)}>
-                  镜像日志
-                </AuthButton>
+                  onClick={() => showImageLog(detail)}
+                />
               </Tooltip>
             )}
             {requestId && (
-              <AuthButton
-                auth="deploy.request.view"
-                type="link"
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={() => store.showRequestDetail(requestId)}>
-                查看
-              </AuthButton>
+              <Tooltip title="查看发布申请">
+                <AuthButton
+                  auth="deploy.request.view"
+                  type="link"
+                  size="small"
+                  aria-label="查看发布申请"
+                  icon={<EyeOutlined />}
+                  onClick={() => store.showRequestDetail(requestId)}
+                />
+              </Tooltip>
             )}
             {canRemove && (
               <Tooltip title="移除未预传镜像且待发布的应用">
@@ -671,12 +673,11 @@ function Publish() {
                   type="link"
                   size="small"
                   danger
+                  aria-label="移除应用"
                   icon={<DeleteOutlined />}
                   loading={removingDetail === detail.id}
                   onClick={() => handleRemoveDetail(detail)}
-                >
-                  移除
-                </Button>
+                />
               </Tooltip>
             )}
           </Space>
