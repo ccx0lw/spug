@@ -24,9 +24,11 @@ from datetime import datetime, timedelta
 import json
 import uuid
 import os
+import re
 
 REPOS_DIR = settings.REPOS_DIR
 BUILD_DIR = settings.BUILD_DIR
+ITERATION_VERSION_PATTERN = re.compile(r'^v([0-9]+)\.([0-9]+)\.([0-9]+)$')
 
 
 def scoped_deploy_requests(user):
@@ -199,6 +201,13 @@ def get_deploy_retry_error(req, now=None):
     return '' if info['retry_allowed'] else info['retry_error']
 
 
+def _parse_iteration_version(version):
+    match = ITERATION_VERSION_PATTERN.fullmatch(version or '')
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
 def get_cross_iteration_warnings(iteration, details):
     """生成迭代明细的跨迭代版本提示，不参与发布准入判断。"""
     from django.db.models import OuterRef, Q, Subquery
@@ -329,6 +338,13 @@ def get_cross_iteration_warnings(iteration, details):
         )
         if latest_req and not is_current_iteration_release:
             is_same_version = latest_req.version == detail.version
+            latest_version = _parse_iteration_version(latest_req.version)
+            target_version = _parse_iteration_version(detail.version)
+            is_version_upgrade = (
+                latest_version is not None
+                and target_version is not None
+                and target_version > latest_version
+            )
             latest_success = {
                 'request_id': latest_req.id,
                 'request_name': latest_req.name,
@@ -347,7 +363,7 @@ def get_cross_iteration_warnings(iteration, details):
                 kind = 'same_version'
                 label = '相同版本'
                 messages.append(f'最近成功发布版本同为 {detail.version}')
-            else:
+            elif not is_version_upgrade:
                 level = 'warning'
                 kind = 'version_switch'
                 label = '版本切换提示'

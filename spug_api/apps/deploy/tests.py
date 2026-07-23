@@ -422,6 +422,54 @@ class CrossIterationWarningTests(TestCase):
         self.assertEqual('info', warning['level'])
         self.assertTrue(warning['latest_success']['is_same_version'])
 
+    def test_higher_semantic_version_is_not_shown_as_rollback(self):
+        current_detail = self.create_detail(self.iteration, 'v1.0.3')
+        self.create_success_request(
+            'v1.0.2',
+            name='单应用指定 Tag 发布',
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertFalse(warning['has_warning'])
+        self.assertEqual('none', warning['kind'])
+        self.assertEqual('', warning['message'])
+        self.assertEqual('v1.0.2', warning['latest_success']['version'])
+
+    def test_semantic_version_segments_are_compared_as_numbers(self):
+        current_detail = self.create_detail(self.iteration, 'v1.10.0')
+        self.create_success_request(
+            'v1.9.9',
+            name='单应用指定 Tag 发布',
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertFalse(warning['has_warning'])
+        self.assertEqual('none', warning['kind'])
+
+    def test_lower_semantic_version_is_still_shown_as_rollback(self):
+        current_detail = self.create_detail(self.iteration, 'v1.0.2')
+        self.create_success_request(
+            'v1.0.3',
+            name='单应用指定 Tag 发布',
+        )
+
+        warning = get_cross_iteration_warnings(
+            self.iteration,
+            [current_detail],
+        )[current_detail.id]
+
+        self.assertTrue(warning['has_warning'])
+        self.assertEqual('version_switch', warning['kind'])
+        self.assertIn('可能属于回滚', warning['message'])
+
     def test_other_pending_iteration_is_included_in_warning(self):
         current_detail = self.create_detail(self.iteration, 'v1.0.0')
         other_iteration = DeployIteration.objects.create(
