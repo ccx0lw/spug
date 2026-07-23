@@ -11,6 +11,44 @@ import json
 import re
 
 CONFIG_KEY_RE = re.compile(r'^_SPUG_[A-Za-z0-9_]+$')
+CONFIG_SCOPE_PERMS = {
+    'app': {
+        'read': 'config.app.view_config',
+        'write': 'config.app.edit_config',
+    },
+    'src': {
+        'read': 'config.src.view_config',
+        'write': 'config.src.edit_config',
+    },
+}
+
+
+def has_config_scope(user, action, config_type, object_id, env_ids):
+    if config_type not in CONFIG_SCOPE_PERMS:
+        return False
+    if not isinstance(env_ids, (list, tuple, set)):
+        env_ids = [env_ids]
+    try:
+        object_id = int(object_id)
+        env_ids = {int(x) for x in env_ids}
+    except (TypeError, ValueError):
+        return False
+
+    model = App if config_type == 'app' else Service
+    if not model.objects.filter(pk=object_id).exists():
+        return False
+    if not env_ids or Environment.objects.filter(
+            pk__in=env_ids
+    ).count() != len(env_ids):
+        return False
+    if user.is_supper:
+        return True
+    if not user.has_perms([CONFIG_SCOPE_PERMS[config_type][action]]):
+        return False
+    perms = user.deploy_perms
+    if config_type == 'app' and object_id not in perms['apps']:
+        return False
+    return env_ids.issubset(perms['envs'])
 
 
 class EnvironmentView(View):
@@ -165,6 +203,9 @@ class ConfigView(View):
         ).parse(request.GET)
         if error is None:
             form.o_id, data = form.pop('id'), []
+            if not has_config_scope(
+                    request.user, 'read', form.type, form.o_id, form.env_id):
+                return json_response(error='未找到配置对象或无操作权限')
             for item in Config.objects.filter(**form).annotate(update_user=F('updated_by__nickname')):
                 tmp = item.to_dict()
                 tmp['update_user'] = item.update_user
@@ -188,6 +229,9 @@ class ConfigView(View):
                 return json_response(
                     error='Key必须以_SPUG_开头且只能包含字母、数字和下划线'
                 )
+            if not has_config_scope(
+                    request.user, 'write', form.type, form.o_id, form.envs):
+                return json_response(error='未找到配置对象或无操作权限')
             
             form.value = form.value.strip()
             form.updated_at = human_datetime()
@@ -214,6 +258,13 @@ class ConfigView(View):
             config = Config.objects.filter(pk=form.id).first()
             if not config:
                 return json_response(error='未找到指定对象')
+            if not has_config_scope(
+                    request.user,
+                    'write',
+                    config.type,
+                    config.o_id,
+                    config.env_id):
+                return json_response(error='未找到配置对象或无操作权限')
             config.desc = form.desc
             config.is_public = form.is_public
             if config.value != form.value:
@@ -236,6 +287,15 @@ class ConfigView(View):
         if error is None:
             config = Config.objects.filter(pk=form.id).first()
             if config:
+                if not has_config_scope(
+                        request.user,
+                        'write',
+                        config.type,
+                        config.o_id,
+                        config.env_id):
+                    return json_response(
+                        error='未找到配置对象或无操作权限'
+                    )
                 ConfigHistory.objects.create(
                     action='3',
                     old_value=config.value,
@@ -257,6 +317,9 @@ class HistoryView(View):
             Argument('type', filter=lambda x: x in dict(Config.TYPES), help='缺少必要参数')
         ).parse(request.body)
         if error is None:
+            if not has_config_scope(
+                    request.user, 'read', form.type, form.o_id, form.env_id):
+                return json_response(error='未找到配置对象或无操作权限')
             data = []
             for item in ConfigHistory.objects.filter(**form).annotate(update_user=F('updated_by__nickname')):
                 tmp = item.to_dict()
@@ -275,6 +338,9 @@ def post_diff(request):
         Argument('envs', type=list, filter=lambda x: len(x), help='缺少必要参数'),
     ).parse(request.body)
     if error is None:
+        if not has_config_scope(
+                request.user, 'read', form.type, form.o_id, form.envs):
+            return json_response(error='未找到配置对象或无操作权限')
         data, form.env_id__in = {}, form.pop('envs')
         for item in Config.objects.filter(**form).order_by('key'):
             if item.key in data:
@@ -294,6 +360,9 @@ def parse_json(request):
         Argument('data', type=dict, help='缺少必要参数')
     ).parse(request.body)
     if error is None:
+        if not has_config_scope(
+                request.user, 'write', form.type, form.o_id, form.env_id):
+            return json_response(error='未找到配置对象或无操作权限')
         data = form.pop('data')
         _parse(request, form, data)
     return json_response(error=error)
@@ -308,6 +377,9 @@ def parse_text(request):
         Argument('data', handler=str.strip, help='缺少必要参数')
     ).parse(request.body)
     if error is None:
+        if not has_config_scope(
+                request.user, 'write', form.type, form.o_id, form.env_id):
+            return json_response(error='未找到配置对象或无操作权限')
         data = {}
         for line in form.pop('data').split('\n'):
             line = line.strip()
