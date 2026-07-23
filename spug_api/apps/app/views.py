@@ -6,7 +6,8 @@ from django.db.models import F
 from libs import JsonParser, Argument, json_response, auth
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2, DeployExtend3
 from apps.config.models import Config, ConfigHistory, Service
-from apps.app.utils import fetch_versions, remove_repo
+from apps.app.utils import fetch_versions, remove_repo, scoped_deploys
+from apps.apis.deploy import get_deploy_webhook_key
 from apps.setting.utils import AppSetting
 import json
 import re
@@ -271,9 +272,16 @@ def get_versions(request, d_id):
 @auth('deploy.app.config|deploy.app.edit')
 def kit_key(request):
     form, error = JsonParser(
-        Argument('key', filter=lambda x: x in ('api_key', 'public_key'), help='参数错误')
+        Argument('key', filter=lambda x: x in ('api_key', 'public_key'), help='参数错误'),
+        Argument('deploy_id', type=int, required=False),
     ).parse(request.body)
     if error is None:
-        api_key = AppSetting.get_default(form.key)
-        return json_response(api_key)
+        if form.key == 'public_key':
+            return json_response(AppSetting.get_default('public_key'))
+        if not form.deploy_id:
+            return json_response(error='缺少发布配置参数')
+        deploy = scoped_deploys(request.user).filter(pk=form.deploy_id).first()
+        if not deploy:
+            return json_response(error='未找到发布配置或无操作权限')
+        return json_response(get_deploy_webhook_key(deploy.id))
     return json_response(error=error)

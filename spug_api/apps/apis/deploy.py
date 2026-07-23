@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def auto_deploy(request, deploy_id, kind):
-    repo, body = _parse_request(request)
+    repo, body = _parse_request(request, deploy_id)
     if not repo:
         return HttpResponseForbidden()
 
@@ -44,8 +44,18 @@ def auto_deploy(request, deploy_id, kind):
         return HttpResponseBadRequest(e)
 
 
-def _parse_request(request):
+def get_deploy_webhook_key(deploy_id):
     api_key = AppSetting.get_default('api_key')
+    if not api_key:
+        return None
+    scope = f'deploy:{int(deploy_id)}'.encode()
+    return hmac.new(api_key.encode(), scope, hashlib.sha256).hexdigest()
+
+
+def _parse_request(request, deploy_id):
+    api_key = get_deploy_webhook_key(deploy_id)
+    if not api_key:
+        return None, None
     token, repo, body = None, None, None
     token = request.headers.get('X-Gitlab-Token')
     if 'X-Gitlab-Token' in request.headers:

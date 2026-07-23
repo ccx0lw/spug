@@ -19,7 +19,10 @@ export default observer(function AutoDeploy() {
     if (store.deploy.extend === '1') {
       fetchVersions()
     }
-    http.post('/api/app/kit/key/', {key: 'api_key'})
+    http.post('/api/app/kit/key/', {
+      key: 'api_key',
+      deploy_id: store.deploy.id
+    })
       .then(res => setKey(res))
   }, [])
 
