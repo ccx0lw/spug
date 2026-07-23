@@ -2,15 +2,14 @@
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
 from django.db import models
-from django.conf import settings
 from libs import ModelMixin, human_datetime
 from apps.account.models import User
 from apps.app.models import Deploy
 from apps.repository.models import Repository
 from apps.docker_image.models import DockerImage
 from apps.config.models import Environment
+from apps.deploy.uploads import resolve_upload_path
 import json
-import os
 from datetime import datetime
 
 class DeployRequest(models.Model, ModelMixin):
@@ -68,14 +67,17 @@ class DeployRequest(models.Model, ModelMixin):
         super().save(*args, **kwargs)
 
     def delete(self, using=None, keep_parents=False):
+        deploy_id = self.deploy_id
+        deploy_extend = self.deploy.extend
+        spug_version = self.spug_version
         super().delete(using, keep_parents)
         if self.repository_id:
             if not DeployRequest.objects.filter(repository=self.repository).exists():
                 self.repository.delete()
-        if self.deploy.extend == '2':
+        if deploy_extend == '2':
             try:
-                os.remove(os.path.join(settings.REPOS_DIR, str(self.deploy_id), self.spug_version))
-            except FileNotFoundError:
+                resolve_upload_path(deploy_id, spug_version).unlink()
+            except (FileNotFoundError, ValueError):
                 pass
 
     def __repr__(self):
@@ -83,6 +85,25 @@ class DeployRequest(models.Model, ModelMixin):
 
     class Meta:
         db_table = 'deploy_requests'
+        ordering = ('-id',)
+
+
+class DeployUpload(models.Model):
+    token = models.CharField(max_length=64, unique=True)
+    deploy = models.ForeignKey(Deploy, on_delete=models.CASCADE)
+    storage_name = models.CharField(max_length=64)
+    original_name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        User,
+        models.PROTECT,
+        related_name='+',
+    )
+    consumed_request_id = models.PositiveIntegerField(null=True)
+    consumed_at = models.DateTimeField(null=True)
+
+    class Meta:
+        db_table = 'deploy_uploads'
         ordering = ('-id',)
 
 

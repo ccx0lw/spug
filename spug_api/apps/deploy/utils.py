@@ -16,6 +16,7 @@ from apps.repository.utils import dispatch as build_repository
 from apps.deploy.models import DeployRequest
 from apps.deploy.helper import Helper, SpugError
 from apps.docker_image.models import DockerImage
+from apps.deploy.uploads import normalize_upload_name, resolve_upload_path
 from apps.docker_image.utils import dispatch as build_docker_image
 from concurrent import futures
 from functools import partial
@@ -987,7 +988,15 @@ def _ext2_deploy(req, helper, env):
             if action.get('src_mode') == '1':  # upload when publish
                 extra = json.loads(req.extra)
                 if 'name' in extra:
-                    action['name'] = extra['name']
+                    action['name'] = normalize_upload_name(extra['name'])
+                try:
+                    resolve_upload_path(
+                        req.deploy_id,
+                        req.spug_version,
+                        must_exist=True,
+                    )
+                except ValueError as exc:
+                    helper.send_error('local', str(exc))
                 break
             helper.send_step('local', step, f'{human_time()} 检测到来源为本地路径的数据传输动作，执行打包...   \r\n')
             action['src'] = action['src'].rstrip('/ ')
@@ -1266,7 +1275,12 @@ def _deploy_ext2_host(helper, h_id, actions, env, spug_version):
                                 raise RuntimeError('internal error 1002')
                             dst = dst.rstrip('/') + '/' + action['name']
                         callback = helper.progress_callback(host.id)
-                        ssh.put_file(os.path.join(REPOS_DIR, env.SPUG_DEPLOY_ID, spug_version), dst, callback)
+                        source_path = resolve_upload_path(
+                            env.SPUG_DEPLOY_ID,
+                            spug_version,
+                            must_exist=True,
+                        )
+                        ssh.put_file(str(source_path), dst, callback)
                     except Exception as e:
                         helper.send_error(host.id, f'Exception: {e}')
                     helper.send_info(host.id, 'transfer completed\r\n')

@@ -60,7 +60,9 @@ export default observer(function () {
     formData['type'] = store.record.type;
     formData['deploy_id'] = store.record.deploy_id;
     if (plan) formData.plan = plan.format('YYYY-MM-DD HH:mm:00');
-    if (fileList.length > 0) formData['extra'] = lds.pick(fileList[0], ['path', 'name']);
+    if (fileList.length > 0) {
+      formData['extra'] = lds.pick(fileList[0], ['path', 'name', 'upload_token']);
+    }
     http.post('/api/deploy/request/ext2/', formData)
       .then(res => {
         message.success('操作成功');
@@ -82,7 +84,7 @@ export default observer(function () {
     formData.append('deploy_id', store.record.deploy_id);
     http.post('/api/deploy/request/upload/', formData, {timeout: 300000})
       .then(res => {
-        file.path = res;
+        Object.assign(file, res);
         setFileList([file])
       })
       .finally(() => setUploading(false))

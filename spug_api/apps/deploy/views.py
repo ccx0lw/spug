@@ -13,6 +13,7 @@ from apps.deploy.models import (
     DeployIterationDetail,
     DeployOperationLog,
     DeployRequest,
+    DeployUpload,
 )
 from apps.deploy.audit import format_app_environment_action, record_deploy_operation
 from apps.app.models import Deploy, DeployExtend2
@@ -39,13 +40,13 @@ from apps.deploy.utils import (
 from apps.host.models import Host
 from apps.config.models import Environment
 from apps.docker_image.models import DockerImage
+from apps.deploy.uploads import normalize_upload_name, resolve_upload_path
 from collections import defaultdict
 from threading import Thread
 from datetime import datetime
 from pathlib import Path
-import shutil
+import secrets
 import json
-import os
 
 
 class OperationLogView(View):
@@ -558,6 +559,7 @@ def post_request_ext1_rollback(request):
 
 
 @auth('deploy.request.add|deploy.request.edit')
+@transaction.atomic
 def post_request_ext2(request):
     form, error = JsonParser(
         Argument('id', type=int, required=False),
@@ -593,11 +595,37 @@ def post_request_ext2(request):
             if not req:
                 return json_response(error='未找到可编辑的发布申请或无操作权限')
         extra = form.pop('extra')
+        upload = None
         if DeployExtend2.objects.filter(deploy=deploy, host_actions__contains='"src_mode": "1"').exists():
             if not extra:
                 return json_response(error='该应用的发布配置中使用了数据传输动作且设置为发布时上传，请上传要传输的数据')
-            form.spug_version = extra['path']
-            form.extra = json.dumps(extra)
+            upload_token = extra.get('upload_token')
+            upload = DeployUpload.objects.select_for_update().filter(
+                token=upload_token,
+                deploy=deploy,
+                created_by_id=request.user.id,
+            ).first()
+            if (
+                    not upload
+                    or (
+                        upload.consumed_request_id is not None
+                        and upload.consumed_request_id != form.id
+                    )):
+                return json_response(error='上传文件无效、已被使用或不属于当前发布配置，请重新上传')
+            try:
+                resolve_upload_path(
+                    deploy.id,
+                    upload.storage_name,
+                    must_exist=True,
+                )
+            except ValueError as exc:
+                return json_response(error=str(exc))
+            form.spug_version = upload.storage_name
+            form.extra = json.dumps({
+                'path': upload.storage_name,
+                'name': upload.original_name,
+                'upload_token': upload.token,
+            })
         else:
             form.spug_version = Repository.make_spug_version(deploy.id)
         form.name = form.name.replace("'", '')
@@ -611,6 +639,10 @@ def post_request_ext2(request):
         else:
             req = DeployRequest.objects.create(created_by=request.user, **form)
             is_required_notify = deploy.is_audit
+        if upload and upload.consumed_request_id is None:
+            upload.consumed_request_id = req.id
+            upload.consumed_at = datetime.now()
+            upload.save(update_fields=('consumed_request_id', 'consumed_at'))
         record_deploy_operation(
             'request',
             req.id,
@@ -803,17 +835,27 @@ def do_upload(request):
     if dir_name.resolve().parent != repos_dir:
         return json_response(error='发布目录参数错误')
 
-    for path in sorted(dir_name.iterdir(), key=lambda item: item.name, reverse=True)[10:]:
-        if path.is_symlink() or path.is_file():
-            path.unlink()
-        elif path.is_dir():
-            shutil.rmtree(str(path))
-
-    file_name = datetime.now().strftime("%Y%m%d%H%M%S")
-    with (dir_name / file_name).open('wb') as f:
-        for chunk in file.chunks():
-            f.write(chunk)
-    return json_response(file_name)
+    try:
+        original_name = normalize_upload_name(file.name)
+        token = secrets.token_hex(32)
+        file_path = resolve_upload_path(deploy.id, token)
+        with file_path.open('xb') as target:
+            for chunk in file.chunks():
+                target.write(chunk)
+        DeployUpload.objects.create(
+            token=token,
+            deploy=deploy,
+            storage_name=token,
+            original_name=original_name,
+            created_by_id=request.user.id,
+        )
+    except (OSError, ValueError) as exc:
+        return json_response(error=str(exc))
+    return json_response({
+        'path': token,
+        'name': original_name,
+        'upload_token': token,
+    })
 
 
 def _resolve_iteration_form_details(user, env_ids, detail_items):

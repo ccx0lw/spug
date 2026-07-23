@@ -9,13 +9,14 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from apps.account.models import User
-from apps.app.models import App, Deploy, DeployExtend3
+from apps.app.models import App, Deploy, DeployExtend2, DeployExtend3
 from apps.config.models import Environment
 from apps.deploy.models import (
     DeployIteration,
     DeployIterationDetail,
     DeployOperationLog,
     DeployRequest,
+    DeployUpload,
 )
 from apps.deploy.views import (
     IterationDetailView,
@@ -29,6 +30,7 @@ from apps.deploy.views import (
     get_request_info,
     post_request_ext1,
     post_request_ext1_rollback,
+    post_request_ext2,
 )
 from apps.host.models import Group, Host
 from apps.docker_image.models import DockerImage
@@ -79,9 +81,23 @@ class DeployUploadSecurityTests(TestCase):
             rst_notify='[]',
             created_by=self.creator,
         )
+        DeployExtend2.objects.create(
+            deploy=self.deploy,
+            server_actions='[]',
+            host_actions=json.dumps([{
+                'title': '传输上传文件',
+                'type': 'transfer',
+                'src_mode': '1',
+                'dst': '/srv/app/',
+            }]),
+            require_upload=True,
+        )
 
     def make_user(self, apps, envs):
+        if self.app.id in apps and self.env.id in envs:
+            return self.creator
         return SimpleNamespace(
+            id=self.creator.id,
             is_supper=False,
             deploy_perms={'apps': set(apps), 'envs': set(envs)},
             has_perms=lambda codes: True,
@@ -107,10 +123,14 @@ class DeployUploadSecurityTests(TestCase):
                 upload_path = os.path.join(
                     repos_dir,
                     str(self.deploy.id),
-                    result['data'],
+                    result['data']['path'],
                 )
 
                 self.assertFalse(result['error'])
+                self.assertEqual(
+                    'release.tar.gz',
+                    result['data']['name'],
+                )
                 with open(upload_path, 'rb') as uploaded:
                     self.assertEqual(b'safe-content', uploaded.read())
 
@@ -134,6 +154,110 @@ class DeployUploadSecurityTests(TestCase):
 
                 self.assertIn('无操作权限', result['error'])
                 self.assertEqual([], os.listdir(repos_dir))
+
+    def test_request_uses_server_upload_metadata_and_token_is_single_use(self):
+        user = self.make_user([self.app.id], [self.env.id])
+        with tempfile.TemporaryDirectory() as repos_dir:
+            with override_settings(REPOS_DIR=repos_dir):
+                uploaded = self.upload(user, str(self.deploy.id))['data']
+                payload = {
+                    'deploy_id': self.deploy.id,
+                    'name': '绑定上传文件',
+                    'extra': {
+                        'path': '../../etc/passwd',
+                        'name': '../../authorized_keys',
+                        'upload_token': uploaded['upload_token'],
+                    },
+                }
+                first_request = self.factory.post(
+                    '/api/deploy/request/ext2/',
+                    data=json.dumps(payload),
+                    content_type='application/json',
+                )
+                first_request.user = user
+                first = json.loads(
+                    post_request_ext2(first_request).content.decode()
+                )
+
+                self.assertFalse(first['error'])
+                deploy_request = DeployRequest.objects.get(
+                    name='绑定上传文件'
+                )
+                extra = json.loads(deploy_request.extra)
+                self.assertEqual(uploaded['path'], extra['path'])
+                self.assertEqual('release.tar.gz', extra['name'])
+                self.assertEqual(
+                    deploy_request.id,
+                    DeployUpload.objects.get(
+                        token=uploaded['upload_token']
+                    ).consumed_request_id,
+                )
+
+                payload['name'] = '重复使用上传文件'
+                second_request = self.factory.post(
+                    '/api/deploy/request/ext2/',
+                    data=json.dumps(payload),
+                    content_type='application/json',
+                )
+                second_request.user = user
+                second = json.loads(
+                    post_request_ext2(second_request).content.decode()
+                )
+
+                self.assertIn('已被使用', second['error'])
+                self.assertFalse(DeployRequest.objects.filter(
+                    name='重复使用上传文件'
+                ).exists())
+
+    def test_request_rejects_forged_upload_metadata_without_token(self):
+        user = self.make_user([self.app.id], [self.env.id])
+        request = self.factory.post(
+            '/api/deploy/request/ext2/',
+            data=json.dumps({
+                'deploy_id': self.deploy.id,
+                'name': '伪造上传路径',
+                'extra': {
+                    'path': '/etc/passwd',
+                    'name': '../../authorized_keys',
+                },
+            }),
+            content_type='application/json',
+        )
+        request.user = user
+
+        result = json.loads(post_request_ext2(request).content.decode())
+
+        self.assertIn('上传文件无效', result['error'])
+        self.assertFalse(DeployRequest.objects.filter(
+            name='伪造上传路径'
+        ).exists())
+
+    def test_deleting_legacy_request_cannot_escape_upload_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            repos_dir = os.path.join(root, 'repos')
+            os.mkdir(repos_dir)
+            protected_path = os.path.join(root, 'protected.txt')
+            with open(protected_path, 'wb') as protected:
+                protected.write(b'keep-me')
+            request_obj = DeployRequest.objects.create(
+                deploy=self.deploy,
+                name='历史恶意路径',
+                type='1',
+                extra=json.dumps({
+                    'path': '../protected.txt',
+                    'name': 'protected.txt',
+                }),
+                host_ids='[]',
+                status='1',
+                version='',
+                spug_version='../protected.txt',
+                created_by=self.creator,
+            )
+
+            with override_settings(REPOS_DIR=repos_dir):
+                request_obj.delete()
+
+            self.assertTrue(os.path.exists(protected_path))
 
 
 class CrossIterationWarningTests(TestCase):
