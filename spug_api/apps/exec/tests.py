@@ -7,16 +7,17 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 
 from apps.account.mfa import issue_sensitive_ticket
-from apps.account.models import User
+from apps.account.models import Role, User
 from apps.exec.models import ExecHistory, Transfer
 from apps.exec.transfer import (
     TransferView,
+    _dispatch_sync,
     _make_rsync_command,
     _make_sshfs_command,
     _remote_is_dir_command,
 )
 from apps.exec.views import TaskView
-from apps.host.models import Host
+from apps.host.models import Group, Host
 from apps.setting.utils import AppSetting
 
 
@@ -78,6 +79,94 @@ class TransferCommandBoundaryTests(TestCase):
         self.assertEqual(
             'deploy@host.internal:/srv/releases; touch /tmp/probe',
             command[-1],
+        )
+
+
+@override_settings(CACHES=TEST_CACHES)
+class TransferSourceHostAuthorizationTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.factory = RequestFactory()
+        self.user = User.objects.create(
+            username='transfer-operator',
+            nickname='文件分发用户',
+            password_hash='-',
+            access_token='',
+            token_expired=0,
+            last_login='',
+            last_ip='',
+        )
+        self.role = Role.objects.create(
+            name='文件分发角色',
+            page_perms=json.dumps({
+                'exec': {'transfer': {'do': True}},
+            }),
+            group_perms='[]',
+            created_by=self.user,
+        )
+        self.user.roles.add(self.role)
+        self.target_group = Group.objects.create(name='授权目标分组')
+        self.source_group = Group.objects.create(name='越权来源分组')
+        self.target = Host.objects.create(
+            name='授权目标主机',
+            hostname='10.0.0.1',
+            port=22,
+            username='root',
+            created_by=self.user,
+        )
+        self.source = Host.objects.create(
+            name='越权来源主机',
+            hostname='10.0.0.2',
+            port=22,
+            username='root',
+            created_by=self.user,
+        )
+        self.target_group.hosts.add(self.target)
+        self.source_group.hosts.add(self.source)
+        self.role.group_perms = json.dumps([self.target_group.id])
+        self.role.save(update_fields=('group_perms',))
+
+    def test_unauthorized_source_host_is_rejected_before_ssh(self):
+        AppSetting.set('MFA', {'enable': True, 'method': 'totp'})
+        ticket, _ = issue_sensitive_ticket(self.user, 'file_transfer')
+        request = self.factory.post(
+            '/exec/transfer/',
+            data={'data': json.dumps({
+                'host': json.dumps([self.source.id, '/srv/releases']),
+                'host_ids': [self.target.id],
+                'dst_dir': '/tmp',
+                'mfa_ticket': ticket,
+            })},
+        )
+        request.user = self.user
+
+        with patch.object(Host, 'get_ssh') as get_ssh:
+            response = TransferView.as_view()(request)
+        result = json.loads(response.content.decode())
+
+        self.assertIn('无权访问数据源主机', result['error'])
+        get_ssh.assert_not_called()
+        self.assertEqual(0, Transfer.objects.count())
+
+    @patch('apps.exec.transfer._cleanup_transfer_dir')
+    @patch('apps.exec.transfer.get_redis_connection')
+    def test_worker_rechecks_source_scope_after_queueing(
+            self, get_redis, cleanup):
+        task = Transfer.objects.create(
+            user=self.user,
+            digest='source-scope-recheck',
+            host_id=self.source.id,
+            src_dir='/tmp/source-scope-recheck',
+            dst_dir='/tmp',
+            host_ids=json.dumps([self.target.id]),
+        )
+
+        _dispatch_sync(task)
+
+        get_redis.return_value.publish.assert_called_once()
+        cleanup.assert_called_once_with(
+            task.src_dir,
+            mounted=True,
         )
 
 

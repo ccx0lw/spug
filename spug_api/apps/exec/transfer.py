@@ -7,6 +7,7 @@ from django.db import close_old_connections
 from django_redis import get_redis_connection
 from apps.exec.models import Transfer
 from apps.account.utils import has_host_perm
+from apps.account.models import User
 from apps.account.mfa import (
     authorize_sensitive_action,
     consume_sensitive_action_authorization,
@@ -72,10 +73,18 @@ class TransferView(View):
             token = uuid.uuid4().hex
             base_dir = os.path.join(settings.TRANSFER_DIR, token)
             if form.host:
-                host_id, path = json.loads(form.host)
+                try:
+                    host_id, path = json.loads(form.host)
+                    host_id = int(host_id)
+                except (TypeError, ValueError):
+                    return json_response(error='数据源主机参数错误')
+                if not has_host_perm(request.user, host_id):
+                    return json_response(error='无权访问数据源主机，请联系管理员')
                 if not path.strip('/'):
                     return json_response(error='请输入正确的数据源路径')
-                host = Host.objects.get(pk=host_id)
+                host = Host.objects.filter(pk=host_id).first()
+                if not host:
+                    return json_response(error='未找到数据源主机')
                 with host.get_ssh() as ssh:
                     code, _ = ssh.exec_command_raw(_remote_is_dir_command(path))
                     if code != 0:
@@ -137,10 +146,32 @@ class TransferView(View):
 
 def _dispatch_sync(task):
     rds = get_redis_connection()
+    user = User.objects.filter(
+        pk=task.user_id,
+        is_active=True,
+        deleted_at__isnull=True,
+    ).first()
+    target_ids = json.loads(task.host_ids)
+    if (
+            not user
+            or not user.has_perms(['exec.transfer.do'])
+            or not has_host_perm(user, target_ids)
+            or (task.host_id and not has_host_perm(user, task.host_id))):
+        rds.publish(
+            task.digest,
+            json.dumps({
+                'key': 'system',
+                'status': -1,
+                'data': '\x1b[31m文件分发权限已失效，任务已取消\x1b[0m',
+            }),
+        )
+        _cleanup_transfer_dir(task.src_dir, mounted=bool(task.host_id))
+        close_old_connections()
+        return
     threads = []
     max_workers = max(10, os.cpu_count() * 5)
     with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for host in Host.objects.filter(id__in=json.loads(task.host_ids)):
+        for host in Host.objects.filter(id__in=target_ids):
             t = executor.submit(_do_sync, rds, task, host)
             t.token = task.digest
             t.key = host.id
