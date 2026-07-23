@@ -1,20 +1,27 @@
 # Copyright: (c) OpenSpug Organization. https://github.com/openspug/spug
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
+import json
+import os
+import re
+import subprocess
+import uuid
+from tempfile import TemporaryFile
+
 from django_redis import get_redis_connection
 from django.conf import settings
 from django.db import close_old_connections
+from git import BadName, Repo
+
 from libs.utils import AttrDict, human_time, render_str
 from apps.repository.models import Repository
 from apps.app.utils import fetch_repo
 from apps.config.utils import compose_configs
 from apps.deploy.helper import Helper
-import json
-import uuid
-import os
 
 REPOS_DIR = settings.REPOS_DIR
 BUILD_DIR = settings.BUILD_DIR
+COMMIT_ID_RE = re.compile(r'^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$')
 
 
 def dispatch(rep: Repository, helper=None):
@@ -63,6 +70,48 @@ def dispatch(rep: Repository, helper=None):
             rep.save()
 
 
+def _resolve_archive_commit(repo, source_type, revision):
+    if not isinstance(revision, str):
+        raise ValueError('Git版本参数错误')
+    if source_type == 'branch':
+        if not COMMIT_ID_RE.fullmatch(revision):
+            raise ValueError('Commit ID格式错误')
+        try:
+            commit = repo.commit(revision)
+            commit.tree
+            return commit.hexsha
+        except (BadName, ValueError):
+            raise ValueError('未找到指定Commit ID')
+    if source_type == 'tag':
+        for tag in repo.tags:
+            if tag.name == revision:
+                return tag.commit.hexsha
+        raise ValueError('未找到指定Tag')
+    raise ValueError('不支持的Git版本类型')
+
+
+def _archive_repository(git_dir, target_dir, build_name, source_type, revision):
+    repo = Repo(git_dir)
+    try:
+        commit_id = _resolve_archive_commit(repo, source_type, revision)
+        with TemporaryFile() as archive:
+            repo.archive(archive, commit_id, prefix=f'{build_name}/')
+            archive.seek(0)
+            task = subprocess.run(
+                ['tar', 'xf', '-'],
+                cwd=target_dir,
+                stdin=archive,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=False,
+            )
+            if task.returncode:
+                message = task.stdout.decode(errors='replace').strip()
+                raise RuntimeError(message or f'tar退出码: {task.returncode}')
+    finally:
+        repo.close()
+
+
 def _build(rep: Repository, helper, env):
     extend = rep.deploy.extend_obj
     extras = json.loads(rep.extra)
@@ -84,8 +133,16 @@ def _build(rep: Repository, helper, env):
         helper.local(f'cd {git_dir} && {extend.hook_pre_server}', env)
 
     helper.send_step('local', 2, f'{human_time()} 执行检出...        ')
-    command = f'cd {git_dir} && git archive --prefix={rep.spug_version}/ {tree_ish} | (cd .. && tar xf -)'
-    helper.local(command)
+    try:
+        _archive_repository(
+            git_dir,
+            REPOS_DIR,
+            rep.spug_version,
+            extras[0],
+            tree_ish,
+        )
+    except Exception as e:
+        helper.send_error('local', f'检出失败: {e}')
     helper.send_info('local', '\033[32m完成√\033[0m\r\n')
 
     if extend.hook_post_server:
