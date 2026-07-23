@@ -295,19 +295,40 @@ function Publish() {
     }
   };
 
-  const handleRemoveDetail = (detailId, appName) => {
+  const handleRemoveDetail = (detail) => {
+    const envStatus = publishStatus.find(
+      item => Number(item.env_id) === Number(detail.env_id)
+    );
+    const envName = envStatus ? envStatus.env_name : '未知环境';
+    const isProd = Boolean(envStatus && envStatus.is_prod);
     Modal.confirm({
-      title: '从迭代中移除应用',
+      title: '移除环境下的应用',
       icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
-      content: `确认移除应用【${appName}】？该操作只允许用于未预传镜像且仍待发布的应用。`,
+      content: (
+        <div>
+          <p>
+            确认从发布环境
+            <Tag color={isProd ? 'error' : 'processing'} style={{ margin: '0 4px' }}>
+              {envName}
+            </Tag>
+            中移除应用【{detail.app_name}】？
+          </p>
+          <Alert
+            showIcon
+            type="warning"
+            message={`只移除【${envName}】环境下的该应用`}
+            description="不会影响迭代中其他发布环境下的同名应用。该操作仅适用于未预传镜像且仍待发布的应用。"
+          />
+        </div>
+      ),
       okText: '确认移除',
       okType: 'danger',
       cancelText: '取消',
       onOk: () => {
-        setRemovingDetail(detailId);
-        return store.removeIterationDetail(detailId)
-          .then(res => {
-            message.success(res.message || `应用【${appName}】已移除`);
+        setRemovingDetail(detail.id);
+        return store.removeIterationDetail(detail.id)
+          .then(() => {
+            message.success(`应用【${detail.app_name}】已从【${envName}】环境移除`);
           })
           .catch(err => {
             message.error(err.message || '移除应用失败');
@@ -549,7 +570,7 @@ function Publish() {
                   danger
                   icon={<DeleteOutlined />}
                   loading={removingDetail === detail.id}
-                  onClick={() => handleRemoveDetail(detail.id, detail.app_name)}
+                  onClick={() => handleRemoveDetail(detail)}
                 >
                   移除
                 </Button>
