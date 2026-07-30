@@ -172,9 +172,6 @@ class DeployView(View):
                 ).parse(request.body)
                 if error:
                     return json_response(error=error)
-                if not has_host_perm(
-                        request.user, extend_form.build_image_host_id):
-                    return json_response(error='无权访问镜像构建主机')
                 extend_form.dst_dir = extend_form.dst_dir.rstrip('/')
                 extend_form.filter_rule = json.dumps(extend_form.filter_rule)
                 if form.id:
@@ -226,6 +223,9 @@ class DeployView(View):
                 ).parse(request.body)
                 if error:
                     return json_response(error=error)
+                if not has_host_perm(
+                        request.user, extend_form.build_image_host_id):
+                    return json_response(error='无权访问镜像构建主机')
                 extend_form.dst_dir = extend_form.dst_dir.rstrip('/')
                 extend_form.filter_rule = json.dumps(extend_form.filter_rule)
                 extend_form.dockerfile_params = json.dumps(extend_form.dockerfile_params)

@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.test import RequestFactory, TestCase
 
 from apps.account.models import User
-from apps.app.models import App, Deploy
+from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2
 from apps.app.views import DeployView, kit_key
 from apps.config.models import Environment
 
@@ -127,6 +127,27 @@ class DeployConfigScopeTests(TestCase):
         response = DeployView.as_view()(request)
         return json.loads(response.content.decode('utf-8'))
 
+    def post_deploy(self, data):
+        request = self.factory.post(
+            '/api/app/deploy/',
+            data=json.dumps(data),
+            content_type='application/json',
+        )
+        request.user = self.creator
+        response = DeployView.as_view()(request)
+        return json.loads(response.content.decode('utf-8'))
+
+    def deploy_data(self, extend):
+        return {
+            'app_id': self.app.id,
+            'env_id': self.env.id,
+            'host_ids': [999],
+            'rst_notify': {'mode': '0'},
+            'extend': extend,
+            'is_parallel': True,
+            'is_audit': False,
+        }
+
     def test_out_of_scope_app_environment_is_rejected_before_write(self):
         result = self.post_config(self.request_user([], []))
 
@@ -160,3 +181,50 @@ class DeployConfigScopeTests(TestCase):
         self.assertIn('无操作权限', result['error'])
         deploy.refresh_from_db()
         self.assertEqual('[]', deploy.host_ids)
+
+    def test_create_and_edit_regular_deploy_without_build_image_host(self):
+        data = self.deploy_data('1')
+        data.update({
+            'git_repo': 'https://example.com/repo.git',
+            'dst_dir': '/srv/app/',
+            'dst_repo': '/srv/releases',
+            'versions': 5,
+            'filter_rule': {},
+        })
+
+        result = self.post_deploy(data)
+
+        self.assertFalse(result['error'])
+        deploy = Deploy.objects.get(app=self.app, env=self.env)
+        extend = DeployExtend1.objects.get(deploy=deploy)
+        self.assertEqual('/srv/app', extend.dst_dir)
+
+        data['id'] = deploy.id
+        data['dst_dir'] = '/srv/app-v2/'
+        result = self.post_deploy(data)
+
+        self.assertFalse(result['error'])
+        extend.refresh_from_db()
+        self.assertEqual('/srv/app-v2', extend.dst_dir)
+
+    def test_create_and_edit_custom_deploy_without_build_image_host(self):
+        data = self.deploy_data('2')
+        data.update({
+            'server_actions': [{'type': 'command', 'command': 'echo build'}],
+            'host_actions': [],
+        })
+
+        result = self.post_deploy(data)
+
+        self.assertFalse(result['error'])
+        deploy = Deploy.objects.get(app=self.app, env=self.env)
+        extend = DeployExtend2.objects.get(deploy=deploy)
+        self.assertEqual('echo build', json.loads(extend.server_actions)[0]['command'])
+
+        data['id'] = deploy.id
+        data['server_actions'][0]['command'] = 'echo deploy'
+        result = self.post_deploy(data)
+
+        self.assertFalse(result['error'])
+        extend.refresh_from_db()
+        self.assertEqual('echo deploy', json.loads(extend.server_actions)[0]['command'])
