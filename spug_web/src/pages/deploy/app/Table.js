@@ -3,7 +3,7 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { observer } from 'mobx-react';
 import {
   BuildOutlined,
@@ -14,7 +14,7 @@ import {
   UpSquareOutlined,
   PlusOutlined
 } from '@ant-design/icons';
-import { Table, Modal, Tag, Divider, message, Tooltip } from 'antd';
+import { Table, Modal, Radio, Tag, Divider, message, Tooltip } from 'antd';
 import { http, hasPermission } from 'libs';
 import { Action, TableCard, AuthButton } from "components";
 import CloneConfirm from './CloneConfirm';
@@ -22,8 +22,18 @@ import store from './store';
 import envStore from 'pages/config/environment/store';
 import lds from 'lodash';
 import tagStore from 'pages/config/tag/store';
+import OperationLog from 'pages/deploy/OperationLog';
 
 function ComTable() {
+  const [cleaning, setCleaning] = useState();
+  const [logTarget, setLogTarget] = useState();
+
+  function isFrontend(info) {
+    return info.app_rel_tags?.some(tid => (
+      tagStore.records.find(item => item.id === tid)?.key === 'front'
+    ))
+  }
+
   function handleClone(e, id) {
     e.stopPropagation();
     let deploy = null;
@@ -71,6 +81,45 @@ function ComTable() {
     })
   }
 
+  function handleClean(e, info) {
+    e.stopPropagation();
+    let target = 'node_modules';
+    Modal.confirm({
+      icon: <ExclamationCircleOutlined/>,
+      title: '清理发布目录',
+      width: 620,
+      content: (
+        <div>
+          <p>请选择要清理的目录。清理后无法恢复，请确认当前没有需要保留的本地文件。</p>
+          <Radio.Group
+            defaultValue={target}
+            onChange={event => target = event.target.value}>
+            <Radio style={{display: 'block', marginBottom: 10}} value="node_modules">
+              $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID/node_modules（仅清理依赖）
+            </Radio>
+            {info.extend !== '2' && (
+              <Radio style={{display: 'block'}} value="repo">
+                $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID（清理整个目录）
+              </Radio>
+            )}
+          </Radio.Group>
+        </div>
+      ),
+      okText: '确认清理',
+      okButtonProps: {danger: true},
+      onOk: () => {
+        setCleaning(info.id);
+        return http.post('/api/app/deploy/clean/', {
+          deploy_id: info.id,
+          target,
+        }).then(response => {
+          const label = target === 'repo' ? '发布目录' : 'node_modules 目录';
+          message.success(response.removed ? `${label}清理成功` : `${label}不存在，无需清理`);
+        }).finally(() => setCleaning(null))
+      },
+    })
+  }
+
   function handleSort(e, info, sort) {
     e.stopPropagation();
     store.fetching = true;
@@ -108,12 +157,24 @@ function ComTable() {
         <Table.Column title="关联主机" dataIndex="host_ids" render={value => `${value.length} 台`}/>
         <Table.Column title="发布审核" dataIndex="is_audit"
                       render={value => value ? <Tag color="green">开启</Tag> : <Tag color="red">关闭</Tag>}/>
-        {hasPermission('deploy.app.config|deploy.app.edit') && (
+        {hasPermission('deploy.app.view|deploy.app.config|deploy.app.edit|deploy.app.clean') && (
           <Table.Column title="操作" render={info => (
             <Action>
               <Action.Button
+                auth="deploy.app.view"
+                onClick={e => {
+                  e.stopPropagation();
+                  setLogTarget(info)
+                }}>操作日志</Action.Button>
+              <Action.Button
                 auth="deploy.app.config"
                 onClick={e => store.showAutoDeploy(info)}>Webhook</Action.Button>
+              {isFrontend(info) && (
+                <Action.Button
+                  auth="deploy.app.clean"
+                  loading={cleaning === info.id}
+                  onClick={e => handleClean(e, info)}>清理目录</Action.Button>
+              )}
               {hasPermission('deploy.app.edit') ? (
                 <Action.Button onClick={e => store.showExtForm(e, record.id, info)}>编辑</Action.Button>
               ) : hasPermission('deploy.app.config') ? (
@@ -128,7 +189,8 @@ function ComTable() {
   }
 
   return (
-    <TableCard
+    <React.Fragment>
+      <TableCard
       tKey="da"
       title="应用列表"
       rowKey="id"
@@ -183,7 +245,16 @@ function ComTable() {
           </Action>
         )}/>
       )}
-    </TableCard>
+      </TableCard>
+      {logTarget && (
+        <OperationLog
+          visible
+          targetType="deploy"
+          targetId={logTarget.id}
+          targetName={`${logTarget.app_name} / ${logTarget.env_name}`}
+          onCancel={() => setLogTarget(null)}/>
+      )}
+    </React.Fragment>
   )
 }
 

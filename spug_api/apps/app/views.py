@@ -3,11 +3,14 @@
 # Released under the AGPL-3.0 License.
 from django.views.generic import View
 from django.db.models import F
+from django.db import transaction
+from django.conf import settings
 from libs import JsonParser, Argument, json_response, auth
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2, DeployExtend3
-from apps.config.models import Config, ConfigHistory, Service
+from apps.config.models import Config, ConfigHistory, Service, Tag
 from apps.app.utils import (
     fetch_versions,
+    clean_deploy_repo,
     has_app_env_scope,
     remove_repo,
     scoped_deploys,
@@ -15,8 +18,31 @@ from apps.app.utils import (
 from apps.apis.deploy import get_deploy_webhook_key
 from apps.account.utils import has_host_perm
 from apps.setting.utils import AppSetting
+from pathlib import Path
 import json
+import logging
 import re
+
+
+logger = logging.getLogger(__name__)
+
+
+def record_cleanup_operation(deploy, target, result, operator):
+    target_label = '整个发布目录' if target == 'repo' else 'node_modules 目录'
+    action = f'清理{target_label}：{result}'[:255]
+    target_name = f'{deploy.app.name}（{deploy.env.name}）'[:100]
+    try:
+        from apps.deploy.audit import record_deploy_operation
+        audit_operator = operator if getattr(operator, 'pk', None) else None
+        with transaction.atomic():
+            record_deploy_operation(
+                'deploy', deploy.id, target_name, action, audit_operator,
+            )
+    except Exception:
+        logger.exception(
+            'deploy_repo_cleanup audit_failed deploy_id=%s target=%s result=%s',
+            deploy.id, target, result,
+        )
 
 
 class AppView(View):
@@ -288,6 +314,127 @@ def get_versions(request, d_id):
     result = {'branches': branches, 'tags': tags}
     cache.set(cache_key, result, 60)    # 缓存 1 分钟
     return json_response(result)
+
+
+@auth('deploy.app.clean')
+def clean_repo(request):
+    form, error = JsonParser(
+        Argument('deploy_id', type=int, help='请指定发布配置'),
+        Argument(
+            'target',
+            filter=lambda x: x in ('repo', 'node_modules'),
+            help='请选择正确的清理范围',
+        ),
+    ).parse(request.body)
+    if error:
+        return json_response(error=error)
+
+    operator_id = getattr(request.user, 'id', None)
+    with transaction.atomic():
+        deploy = scoped_deploys(request.user).select_for_update() \
+            .select_related('app', 'env').filter(pk=form.deploy_id).first()
+        if not deploy:
+            logger.warning(
+                'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
+                'target=%s reason=not_found_or_out_of_scope',
+                operator_id, form.deploy_id, form.target,
+            )
+            return json_response(error='未找到发布配置或无操作权限')
+
+        try:
+            tag_ids = json.loads(deploy.app.rel_tags or '[]')
+        except (TypeError, ValueError):
+            tag_ids = []
+        if not Tag.objects.filter(pk__in=tag_ids, key='front').exists():
+            logger.warning(
+                'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
+                'target=%s reason=not_frontend',
+                operator_id, deploy.id, form.target,
+            )
+            return json_response(error='仅标记为前端的应用可以清理发布目录')
+
+        if deploy.extend == '2' and form.target == 'repo':
+            logger.warning(
+                'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
+                'target=%s reason=custom_deploy_uploads',
+                operator_id, deploy.id, form.target,
+            )
+            return json_response(error='自定义发布的目录可能包含上传制品，仅允许清理 node_modules')
+
+        from apps.deploy.models import DeployRequest
+        if DeployRequest.objects.filter(
+                deploy_id=deploy.id,
+                status__in=('2', '-2')).exists():
+            logger.warning(
+                'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
+                'target=%s reason=active_deploy',
+                operator_id, deploy.id, form.target,
+            )
+            return json_response(
+                error='该发布配置存在发布中或结果未知的申请，暂不能清理目录',
+            )
+
+        from apps.repository.models import Repository
+        from apps.docker_image.models import DockerImage
+        if Repository.objects.filter(
+                deploy_id=deploy.id, status__in=('0', '1')).exists() \
+                or DockerImage.objects.filter(
+                    deploy_id=deploy.id, status__in=('0', '1')).exists():
+            logger.warning(
+                'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
+                'target=%s reason=active_build',
+                operator_id, deploy.id, form.target,
+            )
+            return json_response(error='该发布配置存在未完成的构建任务，暂不能清理目录')
+
+        clean_path = Path(settings.REPOS_DIR).resolve() / str(deploy.id)
+        if form.target == 'node_modules':
+            clean_path /= 'node_modules'
+        logger.warning(
+            'deploy_repo_cleanup started operator_id=%s deploy_id=%s '
+            'app_id=%s env_id=%s target=%s path=%s',
+            operator_id, deploy.id, deploy.app_id, deploy.env_id,
+            form.target, clean_path,
+        )
+        try:
+            removed = clean_deploy_repo(deploy.id, form.target)
+        except ValueError as exc:
+            logger.warning(
+                'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
+                'target=%s path=%s reason=%s',
+                operator_id, deploy.id, form.target, clean_path, exc,
+            )
+            record_cleanup_operation(
+                deploy, form.target, f'失败（{exc}）', request.user,
+            )
+            return json_response(error=f'清理失败：{exc}')
+        except OSError as exc:
+            logger.exception(
+                'deploy_repo_cleanup failed operator_id=%s deploy_id=%s '
+                'target=%s path=%s',
+                operator_id, deploy.id, form.target, clean_path,
+            )
+            record_cleanup_operation(
+                deploy, form.target, f'失败（{exc}）', request.user,
+            )
+            return json_response(error=f'清理失败：{exc}')
+
+        logger.warning(
+            'deploy_repo_cleanup finished operator_id=%s deploy_id=%s '
+            'target=%s path=%s result=%s',
+            operator_id, deploy.id, form.target, clean_path,
+            'removed' if removed else 'not_found',
+        )
+        record_cleanup_operation(
+            deploy,
+            form.target,
+            '已删除' if removed else '目录不存在',
+            request.user,
+        )
+        return json_response({
+            'removed': removed,
+            'target': form.target,
+        })
 
 
 @auth('deploy.app.config|deploy.app.edit')

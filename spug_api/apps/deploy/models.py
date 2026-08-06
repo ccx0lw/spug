@@ -185,6 +185,7 @@ class DeployOperationLog(models.Model):
     TARGET_TYPES = (
         ('request', '发布申请'),
         ('iteration', '迭代'),
+        ('deploy', '发布配置'),
     )
 
     target_type = models.CharField(max_length=20, choices=TARGET_TYPES)
