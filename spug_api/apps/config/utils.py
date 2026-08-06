@@ -1,9 +1,18 @@
 # Copyright: (c) OpenSpug Organization. https://github.com/openspug/spug
 # Copyright: (c) <spug.dev@gmail.com>
 # Released under the AGPL-3.0 License.
-from apps.config.models import Config, Service
-from apps.app.models import App
 import json
+from io import BytesIO
+
+from apps.app.models import App
+from apps.config.models import Config, Service
+
+
+def upload_file_template(ssh, template, remote_path, callback=None):
+    """Upload a database-backed template without creating a local artifact."""
+    content = template.body.encode('utf-8')
+    ssh.put_file_by_fl(BytesIO(content), remote_path, callback)
+
 
 def compose_configs(app, env_id, no_prefix=True):
     configs = dict()

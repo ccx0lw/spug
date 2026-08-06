@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from django.test import RequestFactory, SimpleTestCase, TestCase
 
@@ -7,6 +8,31 @@ from apps.account.models import User
 from apps.app.models import App
 from apps.config.models import Config, ConfigHistory, Environment
 from apps.config.views import CONFIG_KEY_RE, ConfigView
+from apps.config.utils import upload_file_template
+
+
+class FileTemplateUploadTests(SimpleTestCase):
+    def test_template_is_streamed_without_creating_local_file(self):
+        ssh = Mock()
+        template = SimpleNamespace(body='kind: Deployment\n')
+        callback = Mock()
+
+        upload_file_template(
+            ssh,
+            template,
+            '/var/spug/repos/prod/api/7_20260806120000/k8s.yaml',
+            callback,
+        )
+
+        file_obj, remote_path, actual_callback = (
+            ssh.put_file_by_fl.call_args.args
+        )
+        self.assertEqual(b'kind: Deployment\n', file_obj.read())
+        self.assertEqual(
+            '/var/spug/repos/prod/api/7_20260806120000/k8s.yaml',
+            remote_path,
+        )
+        self.assertIs(callback, actual_callback)
 
 
 class ConfigKeySecurityTests(SimpleTestCase):

@@ -9,7 +9,7 @@ from libs.utils import AttrDict, human_time, human_datetime, parse_time, render_
 from apps.host.models import Host
 from apps.account.utils import has_host_perm
 from apps.app.utils import has_deploy_scope
-from apps.config.utils import compose_configs
+from apps.config.utils import compose_configs, upload_file_template
 from apps.config.models import ContainerRepository, FileTemplate
 from apps.repository.models import Repository
 from apps.repository.utils import dispatch as build_repository
@@ -1455,22 +1455,28 @@ def _deploy_ext3_host(req, helper, h_id, env):
             # 查询yaml模板文件，有则写入 并上传
             template = FileTemplate.objects.filter(env_id=req.deploy.env_id, type='yaml').first()
             if template is not None:
-                helper.send_step(host.id, 1, f'{human_time()} 写入 {template.name} 文件       ')
-                helper.send_step(host.id, 1, f'{os.path.join(BUILD_DIR, template.name)}')
+                remote_template_path = os.path.join(
+                    extend.dst_repo,
+                    req.spug_version,
+                    template.name,
+                )
+                helper.send_step(
+                    host.id,
+                    1,
+                    f'{human_time()} 写入 {remote_template_path} 文件       ',
+                )
                 try:
-                    with open(os.path.join(BUILD_DIR, template.name), 'w', encoding='utf-8') as file:
-                        file.write(template.body)
-                    
                     callback = helper.progress_callback(host.id)
-                    ssh.put_file(
-                        os.path.join(BUILD_DIR, template.name),
-                        os.path.join(extend.dst_repo, req.spug_version, template.name),
-                        callback
+                    upload_file_template(
+                        ssh,
+                        template,
+                        remote_template_path,
+                        callback,
                     )
                 except Exception as e:
                     helper.send_error(host.id, f'Exception: {e}')
             else:
-                helper.send_step(host.id, 1, f'{human_time()} {template.name} 模板不存在      ')  
+                helper.send_step(host.id, 1, f'{human_time()} k8s.yaml 模板未配置，跳过      ')
 
             helper.send_step(host.id, 1, '\033[32m完成√\033[0m\r\n')
 
