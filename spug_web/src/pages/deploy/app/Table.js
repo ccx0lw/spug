@@ -95,9 +95,11 @@ function ComTable() {
             <Radio style={{display: 'block', marginBottom: 10}} value="node_modules">
               $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID/node_modules（仅清理依赖）
             </Radio>
-            <Radio style={{display: 'block'}} value="repo">
-              $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID（清理整个目录）
-            </Radio>
+            {info.extend !== '2' && (
+              <Radio style={{display: 'block'}} value="repo">
+                $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID（清理整个目录）
+              </Radio>
+            )}
           </Radio.Group>
         </div>
       ),

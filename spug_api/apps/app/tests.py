@@ -11,6 +11,8 @@ from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2
 from apps.app.views import DeployView, clean_repo, kit_key
 from apps.config.models import Environment, Tag
 from apps.deploy.models import DeployRequest
+from apps.docker_image.models import DockerImage
+from apps.repository.models import Repository
 
 
 class CleanDeployRepoTests(TestCase):
@@ -187,6 +189,73 @@ class CleanDeployRepoTests(TestCase):
 
             self.assertIn('发布中或结果未知', result['error'])
             self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_active_repository_build_is_rejected(self):
+        Repository.objects.create(
+            app=self.app,
+            env=self.env,
+            deploy=self.deploy,
+            version='main#123456',
+            spug_version='build-1',
+            extra='[]',
+            status='1',
+            created_by=self.creator,
+        )
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            result = self.clean(repos_dir, 'repo')
+
+            self.assertIn('未完成的构建任务', result['error'])
+            self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_active_image_build_is_rejected(self):
+        DockerImage.objects.create(
+            app=self.app,
+            env=self.env,
+            deploy=self.deploy,
+            version='main#123456',
+            spug_version='image-1',
+            url='',
+            extra='[]',
+            status='0',
+            created_by=self.creator,
+        )
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            result = self.clean(repos_dir, 'repo')
+
+            self.assertIn('未完成的构建任务', result['error'])
+            self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_custom_deploy_cannot_clean_entire_upload_directory(self):
+        self.deploy.extend = '2'
+        self.deploy.save(update_fields=('extend',))
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            result = self.clean(repos_dir, 'repo')
+
+            self.assertIn('上传制品', result['error'])
+            self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_cleanup_writes_start_and_finish_logs(self):
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            with self.assertLogs('apps.app.views', level='WARNING') as logs:
+                result = self.clean(repos_dir, 'repo')
+
+            self.assertFalse(result['error'])
+            output = '\n'.join(logs.output)
+            self.assertIn('deploy_repo_cleanup started', output)
+            self.assertIn('deploy_repo_cleanup finished', output)
+            self.assertIn('result=removed', output)
 
     def test_node_modules_symlink_is_unlinked_without_touching_target(self):
         with tempfile.TemporaryDirectory() as repos_dir, \
