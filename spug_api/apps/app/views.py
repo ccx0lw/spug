@@ -3,11 +3,13 @@
 # Released under the AGPL-3.0 License.
 from django.views.generic import View
 from django.db.models import F
+from django.db import transaction
 from libs import JsonParser, Argument, json_response, auth
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2, DeployExtend3
 from apps.config.models import Config, ConfigHistory, Service
 from apps.app.utils import (
     fetch_versions,
+    clean_deploy_repo,
     has_app_env_scope,
     remove_repo,
     scoped_deploys,
@@ -288,6 +290,45 @@ def get_versions(request, d_id):
     result = {'branches': branches, 'tags': tags}
     cache.set(cache_key, result, 60)    # 缓存 1 分钟
     return json_response(result)
+
+
+@auth('deploy.app.edit')
+def clean_repo(request):
+    form, error = JsonParser(
+        Argument('deploy_id', type=int, help='请指定发布配置'),
+        Argument(
+            'target',
+            filter=lambda x: x in ('repo', 'node_modules'),
+            help='请选择正确的清理范围',
+        ),
+    ).parse(request.body)
+    if error:
+        return json_response(error=error)
+
+    with transaction.atomic():
+        deploy = scoped_deploys(request.user).select_for_update().filter(
+            pk=form.deploy_id,
+        ).first()
+        if not deploy:
+            return json_response(error='未找到发布配置或无操作权限')
+
+        from apps.deploy.models import DeployRequest
+        if DeployRequest.objects.filter(
+                deploy_id=deploy.id,
+                status__in=('2', '-2')).exists():
+            return json_response(
+                error='该发布配置存在发布中或结果未知的申请，暂不能清理目录',
+            )
+
+        try:
+            removed = clean_deploy_repo(deploy.id, form.target)
+        except (OSError, ValueError) as exc:
+            return json_response(error=f'清理失败：{exc}')
+
+        return json_response({
+            'removed': removed,
+            'target': form.target,
+        })
 
 
 @auth('deploy.app.config|deploy.app.edit')

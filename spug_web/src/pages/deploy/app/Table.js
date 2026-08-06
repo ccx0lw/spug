@@ -3,7 +3,7 @@
  * Copyright (c) <spug.dev@gmail.com>
  * Released under the AGPL-3.0 License.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { observer } from 'mobx-react';
 import {
   BuildOutlined,
@@ -14,7 +14,7 @@ import {
   UpSquareOutlined,
   PlusOutlined
 } from '@ant-design/icons';
-import { Table, Modal, Tag, Divider, message, Tooltip } from 'antd';
+import { Table, Modal, Radio, Tag, Divider, message, Tooltip } from 'antd';
 import { http, hasPermission } from 'libs';
 import { Action, TableCard, AuthButton } from "components";
 import CloneConfirm from './CloneConfirm';
@@ -24,6 +24,8 @@ import lds from 'lodash';
 import tagStore from 'pages/config/tag/store';
 
 function ComTable() {
+  const [cleaning, setCleaning] = useState();
+
   function handleClone(e, id) {
     e.stopPropagation();
     let deploy = null;
@@ -71,6 +73,43 @@ function ComTable() {
     })
   }
 
+  function handleClean(e, info) {
+    e.stopPropagation();
+    let target = 'node_modules';
+    Modal.confirm({
+      icon: <ExclamationCircleOutlined/>,
+      title: '清理发布目录',
+      width: 620,
+      content: (
+        <div>
+          <p>请选择要清理的目录。清理后无法恢复，请确认当前没有需要保留的本地文件。</p>
+          <Radio.Group
+            defaultValue={target}
+            onChange={event => target = event.target.value}>
+            <Radio style={{display: 'block', marginBottom: 10}} value="node_modules">
+              $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID/node_modules（仅清理依赖）
+            </Radio>
+            <Radio style={{display: 'block'}} value="repo">
+              $SPUG_REPOS_DIR/$SPUG_DEPLOY_ID（清理整个目录）
+            </Radio>
+          </Radio.Group>
+        </div>
+      ),
+      okText: '确认清理',
+      okButtonProps: {danger: true},
+      onOk: () => {
+        setCleaning(info.id);
+        return http.post('/api/app/deploy/clean/', {
+          deploy_id: info.id,
+          target,
+        }).then(response => {
+          const label = target === 'repo' ? '发布目录' : 'node_modules 目录';
+          message.success(response.removed ? `${label}清理成功` : `${label}不存在，无需清理`);
+        }).finally(() => setCleaning(null))
+      },
+    })
+  }
+
   function handleSort(e, info, sort) {
     e.stopPropagation();
     store.fetching = true;
@@ -114,6 +153,10 @@ function ComTable() {
               <Action.Button
                 auth="deploy.app.config"
                 onClick={e => store.showAutoDeploy(info)}>Webhook</Action.Button>
+              <Action.Button
+                auth="deploy.app.edit"
+                loading={cleaning === info.id}
+                onClick={e => handleClean(e, info)}>清理目录</Action.Button>
               {hasPermission('deploy.app.edit') ? (
                 <Action.Button onClick={e => store.showExtForm(e, record.id, info)}>编辑</Action.Button>
               ) : hasPermission('deploy.app.config') ? (
