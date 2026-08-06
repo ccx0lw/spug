@@ -263,6 +263,87 @@ class DeployUploadSecurityTests(TestCase):
             self.assertTrue(os.path.exists(protected_path))
 
 
+class DeployOperationLogViewTests(TestCase):
+    def setUp(self):
+        self.creator = User.objects.create(
+            username='deploy-log-admin',
+            nickname='发布日志管理员',
+            password_hash='-',
+            access_token='',
+            last_login='',
+            last_ip='',
+            is_supper=True,
+        )
+        self.env = Environment.objects.create(
+            name='发布日志环境',
+            key='deploy-log-env',
+            created_by=self.creator,
+        )
+        self.app = App.objects.create(
+            name='发布日志应用',
+            key='deploy-log-app',
+            created_by=self.creator,
+        )
+        self.deploy = Deploy.objects.create(
+            app=self.app,
+            env=self.env,
+            host_ids='[]',
+            extend='1',
+            is_audit=False,
+            rst_notify='[]',
+            created_by=self.creator,
+        )
+        DeployOperationLog.objects.create(
+            target_type='deploy',
+            target_id=self.deploy.id,
+            target_name='发布日志应用（发布日志环境）',
+            action='清理 node_modules 目录：已删除',
+            operator=self.creator,
+            operator_name=self.creator.nickname,
+        )
+
+    def get_logs(self, permissions, apps, envs):
+        request = RequestFactory().get(
+            '/api/deploy/operation-log/',
+            data={'target_type': 'deploy', 'target_id': self.deploy.id},
+        )
+        request.user = SimpleNamespace(
+            is_supper=False,
+            deploy_perms={'apps': set(apps), 'envs': set(envs)},
+            has_perms=lambda codes: bool(set(codes).intersection(permissions)),
+        )
+        response = OperationLogView.as_view()(request)
+        return json.loads(response.content.decode('utf-8'))
+
+    def test_deploy_log_is_visible_with_view_permission_and_scope(self):
+        result = self.get_logs(
+            {'deploy.app.view'},
+            {self.app.id},
+            {self.env.id},
+        )
+
+        self.assertFalse(result['error'])
+        self.assertEqual(1, len(result['data']))
+        self.assertEqual(
+            '清理 node_modules 目录：已删除',
+            result['data'][0]['action'],
+        )
+
+    def test_other_page_permission_cannot_read_deploy_log(self):
+        result = self.get_logs(
+            {'deploy.request.view'},
+            {self.app.id},
+            {self.env.id},
+        )
+
+        self.assertEqual('权限拒绝', result['error'])
+
+    def test_out_of_scope_user_cannot_read_deploy_log(self):
+        result = self.get_logs({'deploy.app.view'}, set(), set())
+
+        self.assertIn('无查看权限', result['error'])
+
+
 class CrossIterationWarningTests(TestCase):
     def setUp(self):
         self.user = User.objects.create(

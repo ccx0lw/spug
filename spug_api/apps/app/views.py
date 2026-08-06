@@ -27,6 +27,24 @@ import re
 logger = logging.getLogger(__name__)
 
 
+def record_cleanup_operation(deploy, target, result, operator):
+    target_label = '整个发布目录' if target == 'repo' else 'node_modules 目录'
+    action = f'清理{target_label}：{result}'[:255]
+    target_name = f'{deploy.app.name}（{deploy.env.name}）'[:100]
+    try:
+        from apps.deploy.audit import record_deploy_operation
+        audit_operator = operator if getattr(operator, 'pk', None) else None
+        with transaction.atomic():
+            record_deploy_operation(
+                'deploy', deploy.id, target_name, action, audit_operator,
+            )
+    except Exception:
+        logger.exception(
+            'deploy_repo_cleanup audit_failed deploy_id=%s target=%s result=%s',
+            deploy.id, target, result,
+        )
+
+
 class AppView(View):
     def get(self, request):
         form, error = JsonParser(
@@ -314,7 +332,7 @@ def clean_repo(request):
     operator_id = getattr(request.user, 'id', None)
     with transaction.atomic():
         deploy = scoped_deploys(request.user).select_for_update() \
-            .select_related('app').filter(pk=form.deploy_id).first()
+            .select_related('app', 'env').filter(pk=form.deploy_id).first()
         if not deploy:
             logger.warning(
                 'deploy_repo_cleanup rejected operator_id=%s deploy_id=%s '
@@ -386,12 +404,18 @@ def clean_repo(request):
                 'target=%s path=%s reason=%s',
                 operator_id, deploy.id, form.target, clean_path, exc,
             )
+            record_cleanup_operation(
+                deploy, form.target, f'失败（{exc}）', request.user,
+            )
             return json_response(error=f'清理失败：{exc}')
         except OSError as exc:
             logger.exception(
                 'deploy_repo_cleanup failed operator_id=%s deploy_id=%s '
                 'target=%s path=%s',
                 operator_id, deploy.id, form.target, clean_path,
+            )
+            record_cleanup_operation(
+                deploy, form.target, f'失败（{exc}）', request.user,
             )
             return json_response(error=f'清理失败：{exc}')
 
@@ -400,6 +424,12 @@ def clean_repo(request):
             'target=%s path=%s result=%s',
             operator_id, deploy.id, form.target, clean_path,
             'removed' if removed else 'not_found',
+        )
+        record_cleanup_operation(
+            deploy,
+            form.target,
+            '已删除' if removed else '目录不存在',
+            request.user,
         )
         return json_response({
             'removed': removed,

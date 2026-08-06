@@ -10,7 +10,7 @@ from apps.account.models import User
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2
 from apps.app.views import DeployView, clean_repo, kit_key
 from apps.config.models import Environment, Tag
-from apps.deploy.models import DeployRequest
+from apps.deploy.models import DeployOperationLog, DeployRequest
 from apps.docker_image.models import DockerImage
 from apps.repository.models import Repository
 
@@ -104,6 +104,11 @@ class CleanDeployRepoTests(TestCase):
 
             self.assertFalse(result['error'])
             self.assertFalse(result['data']['removed'])
+            operation_log = DeployOperationLog.objects.get(
+                target_type='deploy',
+                target_id=self.deploy.id,
+            )
+            self.assertEqual('清理整个发布目录：目录不存在', operation_log.action)
 
     def test_out_of_scope_deploy_is_rejected(self):
         user = SimpleNamespace(
@@ -256,6 +261,17 @@ class CleanDeployRepoTests(TestCase):
             self.assertIn('deploy_repo_cleanup started', output)
             self.assertIn('deploy_repo_cleanup finished', output)
             self.assertIn('result=removed', output)
+            operation_log = DeployOperationLog.objects.get(
+                target_type='deploy',
+                target_id=self.deploy.id,
+            )
+            self.assertEqual(self.creator.id, operation_log.operator_id)
+            self.assertEqual('目录清理管理员', operation_log.operator_name)
+            self.assertEqual(
+                '目录清理应用（目录清理环境）',
+                operation_log.target_name,
+            )
+            self.assertEqual('清理整个发布目录：已删除', operation_log.action)
 
     def test_node_modules_symlink_is_unlinked_without_touching_target(self):
         with tempfile.TemporaryDirectory() as repos_dir, \

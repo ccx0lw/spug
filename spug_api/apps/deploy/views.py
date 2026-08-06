@@ -51,12 +51,12 @@ import json
 
 
 class OperationLogView(View):
-    @auth('deploy.request.view|deploy.iteration.view')
+    @auth('deploy.request.view|deploy.iteration.view|deploy.app.view')
     def get(self, request):
         form, error = JsonParser(
             Argument(
                 'target_type',
-                filter=lambda value: value in ('request', 'iteration'),
+                filter=lambda value: value in ('request', 'iteration', 'deploy'),
                 help='日志对象类型错误',
             ),
             Argument('target_id', type=int, help='日志对象ID错误'),
@@ -64,11 +64,11 @@ class OperationLogView(View):
         if error:
             return json_response(error=error)
 
-        permission = (
-            'deploy.request.view'
-            if form.target_type == 'request'
-            else 'deploy.iteration.view'
-        )
+        permission = {
+            'request': 'deploy.request.view',
+            'iteration': 'deploy.iteration.view',
+            'deploy': 'deploy.app.view',
+        }[form.target_type]
         if not request.user.has_perms([permission]):
             return json_response(error='权限拒绝')
 
@@ -80,7 +80,7 @@ class OperationLogView(View):
                     deploy__app_id__in=perms['apps'],
                     deploy__env_id__in=perms['envs'],
                 ).exists()
-            else:
+            elif form.target_type == 'iteration':
                 iteration = DeployIteration.objects.filter(
                     pk=form.target_id,
                 ).first()
@@ -90,6 +90,10 @@ class OperationLogView(View):
                         iteration,
                     )
                 )
+            else:
+                target_visible = scoped_deploys(request.user).filter(
+                    pk=form.target_id,
+                ).exists()
             if not target_visible:
                 return json_response(error='未找到日志对象或无查看权限')
 

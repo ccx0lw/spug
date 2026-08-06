@@ -22,9 +22,11 @@ import store from './store';
 import envStore from 'pages/config/environment/store';
 import lds from 'lodash';
 import tagStore from 'pages/config/tag/store';
+import OperationLog from 'pages/deploy/OperationLog';
 
 function ComTable() {
   const [cleaning, setCleaning] = useState();
+  const [logTarget, setLogTarget] = useState();
 
   function isFrontend(info) {
     return info.app_rel_tags?.some(tid => (
@@ -155,9 +157,15 @@ function ComTable() {
         <Table.Column title="关联主机" dataIndex="host_ids" render={value => `${value.length} 台`}/>
         <Table.Column title="发布审核" dataIndex="is_audit"
                       render={value => value ? <Tag color="green">开启</Tag> : <Tag color="red">关闭</Tag>}/>
-        {hasPermission('deploy.app.config|deploy.app.edit|deploy.app.clean') && (
+        {hasPermission('deploy.app.view|deploy.app.config|deploy.app.edit|deploy.app.clean') && (
           <Table.Column title="操作" render={info => (
             <Action>
+              <Action.Button
+                auth="deploy.app.view"
+                onClick={e => {
+                  e.stopPropagation();
+                  setLogTarget(info)
+                }}>操作日志</Action.Button>
               <Action.Button
                 auth="deploy.app.config"
                 onClick={e => store.showAutoDeploy(info)}>Webhook</Action.Button>
@@ -181,7 +189,8 @@ function ComTable() {
   }
 
   return (
-    <TableCard
+    <React.Fragment>
+      <TableCard
       tKey="da"
       title="应用列表"
       rowKey="id"
@@ -236,7 +245,16 @@ function ComTable() {
           </Action>
         )}/>
       )}
-    </TableCard>
+      </TableCard>
+      {logTarget && (
+        <OperationLog
+          visible
+          targetType="deploy"
+          targetId={logTarget.id}
+          targetName={`${logTarget.app_name} / ${logTarget.env_name}`}
+          onCancel={() => setLogTarget(null)}/>
+      )}
+    </React.Fragment>
   )
 }
 
