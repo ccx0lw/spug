@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.exceptions import MultipleObjectsReturned
 from libs.utils import AttrDict, human_time, render_str, render_str_or_empty
 from apps.docker_image.models import DockerImage
-from apps.config.utils import compose_configs
+from apps.config.utils import compose_configs, upload_file_template
 from apps.deploy.helper import Helper
 from apps.host.models import Host
 from apps.config.models import ContainerRepository, FileTemplate
@@ -243,29 +243,28 @@ def _build(rep: DockerImage, helper, env, image_url):
         # 查询dockerfile模板文件，有则写入
         template = FileTemplate.objects.filter(env_id=rep.env_id, type='dockerfile').first()
         if template is not None:
-            helper.send_step('image', 1, f'{human_time()} 写入 {template.name} 文件       ')
-            template_file_path = os.path.join(BUILD_DIR, rep.spug_version, template.name)
-            # helper.send_step('image', 1, f'本地 : {template_file_path}')
-            # helper.send_step('image', 1, f'远程 : {os.path.join(extend.dst_repo, rep.spug_version, template.name)}')
+            remote_template_path = os.path.join(
+                extend.dst_repo,
+                rep.spug_version,
+                template.name,
+            )
+            helper.send_step(
+                'image',
+                1,
+                f'{human_time()} 写入 {remote_template_path} 文件       ',
+            )
             try:
-                os.makedirs(os.path.dirname(template_file_path), exist_ok=True)
-                
-                with open(template_file_path, 'w', encoding='utf-8') as file:
-                    file.write(template.body)
-                    
-                if os.path.exists(template_file_path) and os.path.getsize(template_file_path) > 0:
-                    callback = helper.progress_callback('image')
-                    ssh.put_file(
-                        template_file_path,
-                        os.path.join(extend.dst_repo, rep.spug_version, template.name),
-                        callback
-                    )
-                else:
-                    raise Exception(template.name + " 模板文件写入失败或文件为空")
+                callback = helper.progress_callback('image')
+                upload_file_template(
+                    ssh,
+                    template,
+                    remote_template_path,
+                    callback,
+                )
             except Exception as e:
                 helper.send_error('image', f'Exception: {e}')
         else:
-            helper.send_step('image', 1, f'{human_time()} Dockerfile模板未配置，跳过      ')     
+            helper.send_step('image', 1, f'{human_time()} Dockerfile模板未配置，跳过      ')
 
         helper.send_step('image', 1, '\033[32m完成√\033[0m\r\n')
         
@@ -288,4 +287,3 @@ def _build(rep: DockerImage, helper, env, image_url):
             helper.remote('image', ssh, command)
 
         helper.send_step('image', 100, f'\r\n{human_time()} ** \033[32m镜像编译上传成功\033[0m **')
-
