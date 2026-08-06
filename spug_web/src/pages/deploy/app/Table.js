@@ -26,6 +26,12 @@ import tagStore from 'pages/config/tag/store';
 function ComTable() {
   const [cleaning, setCleaning] = useState();
 
+  function isFrontend(info) {
+    return info.app_rel_tags?.some(tid => (
+      tagStore.records.find(item => item.id === tid)?.key === 'front'
+    ))
+  }
+
   function handleClone(e, id) {
     e.stopPropagation();
     let deploy = null;
@@ -147,16 +153,18 @@ function ComTable() {
         <Table.Column title="关联主机" dataIndex="host_ids" render={value => `${value.length} 台`}/>
         <Table.Column title="发布审核" dataIndex="is_audit"
                       render={value => value ? <Tag color="green">开启</Tag> : <Tag color="red">关闭</Tag>}/>
-        {hasPermission('deploy.app.config|deploy.app.edit') && (
+        {hasPermission('deploy.app.config|deploy.app.edit|deploy.app.clean') && (
           <Table.Column title="操作" render={info => (
             <Action>
               <Action.Button
                 auth="deploy.app.config"
                 onClick={e => store.showAutoDeploy(info)}>Webhook</Action.Button>
-              <Action.Button
-                auth="deploy.app.edit"
-                loading={cleaning === info.id}
-                onClick={e => handleClean(e, info)}>清理目录</Action.Button>
+              {isFrontend(info) && (
+                <Action.Button
+                  auth="deploy.app.clean"
+                  loading={cleaning === info.id}
+                  onClick={e => handleClean(e, info)}>清理目录</Action.Button>
+              )}
               {hasPermission('deploy.app.edit') ? (
                 <Action.Button onClick={e => store.showExtForm(e, record.id, info)}>编辑</Action.Button>
               ) : hasPermission('deploy.app.config') ? (

@@ -9,7 +9,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from apps.account.models import User
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2
 from apps.app.views import DeployView, clean_repo, kit_key
-from apps.config.models import Environment
+from apps.config.models import Environment, Tag
 from apps.deploy.models import DeployRequest
 
 
@@ -35,6 +35,13 @@ class CleanDeployRepoTests(TestCase):
             key='clean-repo-app',
             created_by=self.creator,
         )
+        self.frontend_tag = Tag.objects.create(
+            name='前端',
+            key='front',
+            created_by=self.creator,
+        )
+        self.app.rel_tags = json.dumps([self.frontend_tag.id])
+        self.app.save(update_fields=('rel_tags',))
         self.deploy = Deploy.objects.create(
             app=self.app,
             env=self.env,
@@ -110,6 +117,58 @@ class CleanDeployRepoTests(TestCase):
 
             self.assertIn('无操作权限', result['error'])
             self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_edit_permission_does_not_authorize_cleanup(self):
+        user = SimpleNamespace(
+            is_supper=False,
+            deploy_perms={
+                'apps': {self.app.id},
+                'envs': {self.env.id},
+            },
+            has_perms=lambda codes: bool(
+                {'deploy.app.edit'}.intersection(codes)
+            ),
+        )
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            result = self.clean(repos_dir, 'repo', user)
+
+            self.assertEqual('权限拒绝', result['error'])
+            self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_non_frontend_app_is_rejected(self):
+        self.app.rel_tags = '[]'
+        self.app.save(update_fields=('rel_tags',))
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            result = self.clean(repos_dir, 'repo')
+
+            self.assertIn('仅标记为前端', result['error'])
+            self.assertTrue(os.path.isdir(deploy_dir))
+
+    def test_clean_permission_authorizes_cleanup(self):
+        user = SimpleNamespace(
+            is_supper=False,
+            deploy_perms={
+                'apps': {self.app.id},
+                'envs': {self.env.id},
+            },
+            has_perms=lambda codes: bool(
+                {'deploy.app.clean'}.intersection(codes)
+            ),
+        )
+        with tempfile.TemporaryDirectory() as repos_dir:
+            deploy_dir = os.path.join(repos_dir, str(self.deploy.id))
+            os.makedirs(deploy_dir)
+
+            result = self.clean(repos_dir, 'repo', user)
+
+            self.assertFalse(result['error'])
+            self.assertFalse(os.path.exists(deploy_dir))
 
     def test_running_deploy_is_rejected(self):
         DeployRequest.objects.create(

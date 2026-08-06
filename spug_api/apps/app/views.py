@@ -6,7 +6,7 @@ from django.db.models import F
 from django.db import transaction
 from libs import JsonParser, Argument, json_response, auth
 from apps.app.models import App, Deploy, DeployExtend1, DeployExtend2, DeployExtend3
-from apps.config.models import Config, ConfigHistory, Service
+from apps.config.models import Config, ConfigHistory, Service, Tag
 from apps.app.utils import (
     fetch_versions,
     clean_deploy_repo,
@@ -292,7 +292,7 @@ def get_versions(request, d_id):
     return json_response(result)
 
 
-@auth('deploy.app.edit')
+@auth('deploy.app.clean')
 def clean_repo(request):
     form, error = JsonParser(
         Argument('deploy_id', type=int, help='请指定发布配置'),
@@ -306,11 +306,17 @@ def clean_repo(request):
         return json_response(error=error)
 
     with transaction.atomic():
-        deploy = scoped_deploys(request.user).select_for_update().filter(
-            pk=form.deploy_id,
-        ).first()
+        deploy = scoped_deploys(request.user).select_for_update() \
+            .select_related('app').filter(pk=form.deploy_id).first()
         if not deploy:
             return json_response(error='未找到发布配置或无操作权限')
+
+        try:
+            tag_ids = json.loads(deploy.app.rel_tags or '[]')
+        except (TypeError, ValueError):
+            tag_ids = []
+        if not Tag.objects.filter(pk__in=tag_ids, key='front').exists():
+            return json_response(error='仅标记为前端的应用可以清理发布目录')
 
         from apps.deploy.models import DeployRequest
         if DeployRequest.objects.filter(
