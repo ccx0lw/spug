@@ -2,6 +2,7 @@
 
 cd spug_api
 source venv/bin/activate
+python manage.py migrate
 python manage.py runserver
 
 cd spug_web
