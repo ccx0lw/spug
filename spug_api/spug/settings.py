@@ -140,6 +140,56 @@ SPUG_VERSION = 'v3.3.2'
 
 # override default config
 try:
+    from spug import overrides as _overrides
     from spug.overrides import *
 except ImportError:
-    pass
+    _overrides = None
+
+
+# Redis connection parameters can be overridden in spug/overrides.py.  Keep
+# the old REDIS_* variables and explicit CACHES/CHANNEL_LAYERS overrides working
+# for backwards compatibility.
+REDIS = globals().get('REDIS', {})
+REDIS_HOST = REDIS.get('HOST', globals().get('REDIS_HOST', '127.0.0.1'))
+REDIS_PORT = int(REDIS.get('PORT', globals().get('REDIS_PORT', 6379)))
+REDIS_PASSWORD = REDIS.get(
+    'PASSWORD', globals().get('REDIS_PASSWORD')) or None
+REDIS_CACHE_DB = int(REDIS.get(
+    'CACHE_DB', globals().get('REDIS_CACHE_DB', 1)))
+REDIS_CHANNEL_DB = int(REDIS.get(
+    'CHANNEL_DB', globals().get('REDIS_CHANNEL_DB', 0)))
+
+if _overrides is None or not hasattr(_overrides, 'CACHES'):
+    redis_options = {
+        'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+    }
+    if REDIS_PASSWORD:
+        redis_options['PASSWORD'] = REDIS_PASSWORD
+
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}',
+            'OPTIONS': redis_options,
+        }
+    }
+
+if _overrides is None or not hasattr(_overrides, 'CHANNEL_LAYERS'):
+    redis_channel_host = (REDIS_HOST, REDIS_PORT)
+    if REDIS_PASSWORD or REDIS_CHANNEL_DB:
+        redis_channel_host = {
+            'address': redis_channel_host,
+            'db': REDIS_CHANNEL_DB,
+            'password': REDIS_PASSWORD,
+        }
+
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [redis_channel_host],
+                'capacity': 1000,
+                'expiry': 120,
+            },
+        },
+    }
